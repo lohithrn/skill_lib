@@ -12,11 +12,14 @@ emit_json() {
   printf '  "schema": "codegraph-caps/1",\n'
   printf '  "root": "%s",\n' "$(jstr "$ROOT")"
   printf '  "fidelity": "%s",\n' "$FIDELITY"
-  printf '  "caps": {"file_lines": %s, "file_lines_warn": %s, "method_lines": %s, "method_lines_warn": %s, "nesting": %s, "loop_body": %s, "params": %s, "params_warn": %s, "public_members": %s, "public_members_warn": %s},\n' \
-    "$CAP_FILE" "$CAP_FILE_WARN" "$CAP_METHOD" "$CAP_METHOD_WARN" "$CAP_NESTING" \
+  printf '  "caps": {"file_lines": %s, "file_lines_warn": %s, "folder_files": %s, "folder_files_warn": %s, "method_lines": %s, "method_lines_warn": %s, "nesting": %s, "loop_body": %s, "params": %s, "params_warn": %s, "public_members": %s, "public_members_warn": %s},\n' \
+    "$CAP_FILE" "$CAP_FILE_WARN" "$CAP_FOLDER" "$CAP_FOLDER_WARN" "$CAP_METHOD" "$CAP_METHOD_WARN" "$CAP_NESTING" \
     "$CAP_LOOP_BODY" "$CAP_PARAMS" "$CAP_PARAMS_WARN" "$CAP_PUBLIC" "$CAP_PUBLIC_WARN"
-  printf '  "scanned": {"total": %s, "code": %s, "python": %s, "ts": %s, "java_kotlin": %s, "go": %s},\n' \
+  # `folders` is how many folders hold code at all, so a reader can see a "4 folders over the cap"
+  # total against 6 folders total and read it as a flat repo rather than four local problems.
+  printf '  "scanned": {"total": %s, "code": %s, "folders": %s, "python": %s, "ts": %s, "java_kotlin": %s, "go": %s},\n' \
     "$(wc -l <"$TMP/all.txt" | tr -d ' ')" "$(wc -l <"$TMP/code.txt" | tr -d ' ')" \
+    "$(wc -l <"$TMP/folders.txt" | tr -d ' ')" \
     "$(wc -l <"$TMP/python.txt" | tr -d ' ')" \
     "$(wc -l <"$TMP/ts.txt" | tr -d ' ')" "$(wc -l <"$TMP/java.txt" | tr -d ' ')" \
     "$(wc -l <"$TMP/go.txt" | tr -d ' ')"

@@ -53,7 +53,7 @@ The seven claim families and their canonical forms:
 | **Isolation** | nothing outside the composition root imports `<resolvers dir>` | forbidden-import rule with the root as the only allowed importer |
 | **Purity** | `utils/` imports nothing from `src/` | forbidden-import rule |
 | **Port health** | every port has ≥1 resolver, an `Absent` resolver, a contract suite, and a registration test | walk the port list; assert each of the four |
-| **Caps** | no file over the file cap, no method over the method cap, no nesting over the nesting cap | run `caps.sh`; assert `totals.*_major == 0` **and** that the metric was measured at all (below) |
+| **Caps** | no file over the file cap, no folder over the fan-out cap, no method over the method cap, no nesting over the nesting cap | run `caps.sh`; assert `totals.*_major == 0` — including `totals.folder_files_major == 0` — **and** that the metric was measured at all (below) |
 | **Test layering** | no test imports a higher test layer | walk `tests/`, assert the import direction |
 
 Rules for the tests themselves:
@@ -63,7 +63,8 @@ Rules for the tests themselves:
    broke it, or nobody will fix it.
 3. **No test may depend on another test's ordering** or on a prior run's artifact.
 4. **Pin the cap values in one place** — read them from the same environment variables `caps.sh`
-   uses (`CG_CAP_FILE`, `CG_CAP_METHOD`, `CG_CAP_NESTING`, `CG_CAP_PARAMS`, `CG_CAP_PUBLIC`), and
+   uses (`CG_CAP_FILE`, `CG_CAP_FOLDER`, `CG_CAP_METHOD`, `CG_CAP_NESTING`, `CG_CAP_PARAMS`,
+   `CG_CAP_PUBLIC`), and
    fall back to the documented defaults. Two sources of truth for a cap is a defect.
 5. **Exclude what `scope.json` excluded** — vendored, generated, migrations, fixtures, build
    output. A fitness suite that fails on generated code gets disabled within a week.
@@ -73,7 +74,13 @@ Rules for the tests themselves:
    also true when no scanner ran: on Ruby, C# or PHP the key is absent, `.get(k, 0)` returns 0,
    and the gate is green forever. So the generated test must first assert
    `scanned.<language> > 0` for the repo's primary language and fail if `degraded[]` names it or
-   `fidelity != "native"` — mechanism for rule 6, not a restatement of it.
+   `fidelity != "native"` — mechanism for rule 6, not a restatement of it. Two metrics are exempt
+   from that guard because no language scanner produces them: `file_lines` and `folder_files` come
+   from the file list itself, so the coverage assertion for both is `scanned.code > 0`. Do **not**
+   gate `folder_files` on `scanned.folders > 0`: that number is legitimately 0 in a repo whose code
+   is all `.tf` or all headers, which the cap excludes on purpose, and the test would then fail
+   forever claiming a metric was unmeasured when it was correctly inapplicable. `scanned.folders == 0`
+   with `scanned.code > 0` is the `UNVERIFIED` case of rule 6, not a red test.
 
 ---
 
@@ -121,7 +128,7 @@ Fitness suite: tests/fitness/  (7 claims, tier 1×3 / tier 2×3 / tier 3×1)
 |----|-------|------|--------|
 | F1 | no cycles among src modules   | test_no_cycles.py       | GREEN |
 | F4 | every port has a contract     | test_contract_coverage.py| GREEN |
-| F7 | caps: 250/15/1                | test_caps.py            | RATCHET budget 3 |
+| F7 | caps: 250 lines/7 per folder/15/1 | test_caps.py       | RATCHET budget 3 |
 
 UNVERIFIED: F6 (no test-layer oracle in this repo)
 Next: add `pytest tests/fitness` to CI, then /md_codegraph verify

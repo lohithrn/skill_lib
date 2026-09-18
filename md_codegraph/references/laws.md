@@ -89,7 +89,7 @@ concedes "sometimes classes are a little more than 50 lines" `[P]`.
 | 4 | First class collections | — | "any class that contains a collection should contain no other member variables" |
 | 5 | One dot per line | **1** | Law of Demeter, mechanized |
 | 6 | Don't abbreviate | names of **1–2 words** | intention-revealing names |
-| 7 | Keep all entities small | **"no class over 50 lines and no package over 10 files"** | far stricter than ours — see §8 |
+| 7 | Keep all entities small | **"no class over 50 lines and no package over 10 files"** | the 50-line class is far stricter than ours; the 10-file package is **looser** — ours is 5/**7** (§8) |
 | 8 | No classes with more than two instance variables | **2** | pushes composition; conflicts with our Context |
 | 9 | No getters/setters/properties | — | Bay: "Another way this rule is commonly stated is 'Tell, don't ask'" |
 
@@ -230,21 +230,38 @@ gives their empirical standing.
 | Public members per class | 5 / **7** | **<5** public methods `[P]`; "A human brain can generally easily keep track of about 7 different things" `[P]`; WMC threshold **100**, methods/class 20 preferred / 40 acceptable `[S]` | *Elegant Objects* §3.1; Linux; NASA SATC | 7±2 applied to code is folk psychology |
 | Composition roots per deployable | **1** | "A Composition Root is a (preferably) unique location in an application where modules are composed together" `[P]` | Seemann, 2011 | no |
 | Instance variables / attributes | — (Context exempt) | **2** `[P]` (Bay r8); **≤4** attributes `[P]` (*Elegant Objects* §2.1) | | **yes** — both irreconcilable with a Context; we reject them |
-| Files per package | — | **10** `[P]` | Bay r7 | informative |
+| Files directly in one folder | 5 / **7** code files | **10** per package `[P]` | Bay r7 | ours is stricter; Bay's is the only published number in the neighbourhood |
 | Cyclomatic complexity | not capped directly (implied by 25 lines + nesting 1) | **10** — "a reasonable, but not magical, upper limit" `[P]`; large `case` statements exempted `[P]`; "limits as high as 15 have been used successfully as well" `[P]`; bands 1–10 simple / 11–20 moderate / 21–50 high / >50 "untestable program (very high risk)" `[P]` | McCabe, IEEE TSE SE-2(4), 1976, p. 314; NIST SP 500-235 §2.5; **bands: CMU/SEI-97-HB-001 p. 147, not NIST** | **yes** — NIST: the limit "remains somewhat controversial" `[P]` |
 | Cognitive complexity | not capped | **15** per method — the analyzer default `[P]` (Java, Python, PHP, JS/TS, C#/VB; C# adds property max 3) | Sonar `S3776` source | the white paper itself publishes **no** threshold `[P]` |
 | NPath | not capped | **200** `[S]` | Checkstyle/PMD, from Nejmeh's "informal NPATH limit of 200" at AT&T Bell Labs, CACM 31(2), 1988 | an in-house limit tooling adopted, not a formal recommendation |
 | Assertion density | — | "a minimum of **two** assertions per function" `[P]` | NASA/JPL P10 R5 | safety-critical context only |
 
-**Two scope rules, without which every number above is misread.**
+**Three scope rules, without which every number above is misread.**
 
 **1. The 250-line cap is scoped to code extensions.** `caps.sh` measures `file_lines` on source files only; markdown, data and config files are not
 measured and are not findings. The cap is a claim about how much *code* one file may hold, so firing it on prose is a false finding — and a tool
 that emits false findings gets ignored wholesale, which costs far more than an unmeasured README. This reference file is itself well over 250 lines,
 deliberately. Length limits on prose, if you want them, are a different rule with a different justification, and this skill does not make one.
 
-**2. An exemption is a seam, not an escape hatch — and the difference is mechanical.** `scripts/lib/cap_pragma.py` reads a source-line pragma placed
-directly above the declaration (above the first decorator, when there is one):
+**2. The folder cap counts files, never folders, and its remedy is a name.** `folder_files` is the only cap whose subject is a directory, and it
+exists because of `doctrine.md` §9: a folder is a question node, a file is an answer node. Nineteen answers directly under one folder is not a
+quantity problem, it is a **missing question** — the folder's name no longer predicts what is inside it, so the tree has stopped being the graph and
+the reader is back to opening files to find out. Hence the shape of the cap: **5 warn / 7 hard on the code files directly in a folder, and no cap
+whatsoever on subfolders.** Depth is the remedy, so charging for depth would punish the fix; a folder holding twenty folders and two files is
+correct by this rule and usually excellent. Three scoping details, each of which would otherwise produce a false finding: `.tf`/`.tfvars` are not
+counted, because in Terraform the directory *is* the module and the remedy the cap asks for would create a different module; `.h`/`.hpp` are not
+counted, because a header declares the answer its source defines; and a **total answer set is not a breach** — nine resolvers answering one
+question, one per file, is exactly what §4 of the doctrine asks for, and splitting them into sub-buckets to satisfy a number is the interface farm
+wearing a different hat. That last case is what the folder-level exemption is for, and its home is a `.codegraph-exempt` file **in the folder**
+(`codegraph:exempt folder_files -- <reason>`), because a directory has no declaration to put a pragma above. Same two conditions as rule 3 and the
+same `exempt` severity in the report — including the failure mode: a marker that names `folder_files` and gives no reason after `--` suppresses
+nothing, the breach keeps its real severity, and the folder is additionally reported as `exempt_without_reason`, exactly as a reasonless source
+pragma is. A marker that cites nothing is not a quieter cap; it is a second finding.
+
+**3. An exemption is a seam, not an escape hatch — and the difference is mechanical.** `scripts/lib/cap_pragma.py` reads a source-line pragma placed
+directly above the declaration (above the first decorator, when there is one). Two metrics have no declaration to sit above, so each has one other
+home and the same grammar: `file_lines` is exempted in the **first 20 lines of the file**, and `folder_files` in a **`.codegraph-exempt` file inside
+the folder** (rule 2). The pragma itself:
 
 ```
 # codegraph:exempt method_lines, loop_body, nesting -- <reason>

@@ -105,7 +105,7 @@ them from.
 
 | Skill | What it does |
 | --- | --- |
-| `md_codegraph` | Reads a codebase as a dependency graph, then restructures it so every conflict becomes an interface, every interface has replaceable implementations wired at a single composition root, and the folder tree is the graph. Explicit invocation only. Bundles **5** subagents. |
+| `md_codegraph` | Reads a codebase as a dependency graph, then restructures it so every conflict becomes an interface, every interface has replaceable implementations wired at a single composition root, and the folder tree is the graph. Caps fan-out at **7** code files directly in one folder with unlimited subfolders, so a flat pile of files is reported as a question nobody named. Asks first whether to read the uncommitted diff, a commit range, or the whole tree. Explicit invocation only. Bundles **5** subagents. |
 | `md_policy-code-review` | Reviews a tree or a diff against the whole standing policy at once — the **40**-rule architecture, dependency-injection and maintainability standard (group `R`), graph structure (`G`), house conventions (`H`), and ordinary change review (`C`) — with a deterministic linter under `scripts/` whose JSON findings are treated as measured ground truth rather than re-eyeballed. `review` and `diff` emit **suggestions only**; the one `refactor` mode applies them, and its gate is inspect-then-plan-then-edit. Holds the standing doctrine as `references/standing-doctrine.md` and cites it as precedence rules 1 and 2. |
 
 ### Diagnose — find the cause before touching the code

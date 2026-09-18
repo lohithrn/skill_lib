@@ -14,7 +14,7 @@ Two kinds, and the kind is a property of the file, not of the mood the run ends 
 
 | Path | Written by | Kind |
 |---|---|---|
-| `.codegraph/scope.json` | phase 0 | scratch |
+| `.codegraph/scope.json` | phase 0a (the answered scope), extended by phase 0 | scratch |
 | `.codegraph/oracle.json` | phase 0 | scratch |
 | `.codegraph/graph.raw.json` | `codegraph-cartographer` | scratch |
 | `.codegraph/graph.dim.json` | `codegraph-cartographer` | scratch |

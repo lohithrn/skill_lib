@@ -7,10 +7,11 @@
 # The scanners live in lib/ and emit JSONL violations on stdout, one per line:
 #   {"file":"..","line":N,"metric":"..","value":N,"cap":N,"severity":"..","name":".."}
 #
-# Three responsibilities, three files, because this script was over its own 250-line cap:
-#   lib/caps_files.sh   WHICH files may be measured, and the path-safety trust boundary
-#   lib/caps_report.sh  HOW a finished scan is rendered (json, text)
-#   this file           the caps themselves, and the order the scanners run in
+# Four responsibilities, four files, because this script was over its own 250-line cap:
+#   lib/caps_files.sh    WHICH files may be measured, and the path-safety trust boundary
+#   lib/caps_folders.sh  the one cap whose subject is a DIRECTORY, not a file
+#   lib/caps_report.sh   HOW a finished scan is rendered (json, text)
+#   this file            the caps themselves, and the order the scanners run in
 
 set -uo pipefail
 
@@ -25,7 +26,7 @@ LIB="$HERE/lib"
 # Sourced, not optional. Without either half this script cannot produce a correct answer, so a
 # missing part is exit 2 rather than a degraded scan: "no scanner" and "nothing wrong" must never
 # render the same, and that includes the case where the scanner itself is incomplete.
-for part in caps_files.sh caps_report.sh; do
+for part in caps_files.sh caps_folders.sh caps_report.sh; do
   [ -f "$LIB/$part" ] || { printf 'caps.sh: missing required part: lib/%s\n' "$part" >&2; exit 2; }
   # shellcheck source=/dev/null
   . "$LIB/$part"
@@ -42,6 +43,8 @@ CAP_PARAMS_WARN="${CG_CAP_PARAMS_WARN:-3}"
 CAP_PARAMS="${CG_CAP_PARAMS:-4}"
 CAP_PUBLIC_WARN="${CG_CAP_PUBLIC_WARN:-5}"
 CAP_PUBLIC="${CG_CAP_PUBLIC:-7}"
+CAP_FOLDER_WARN="${CG_CAP_FOLDER_WARN:-5}"
+CAP_FOLDER="${CG_CAP_FOLDER:-7}"
 
 ROOT="."
 FORMAT="json"
@@ -49,7 +52,8 @@ EXCLUDE_EXTRA=""
 
 usage() {
   cat <<'EOF'
-caps.sh — measure file length, method length, nesting, loop bodies, else, params, public members.
+caps.sh — measure file length, files per folder, method length, nesting, loop bodies, else, params,
+public members.
 
   caps.sh [--root PATH] [--json|--text] [--exclude REGEX] [--help]
 
@@ -59,6 +63,14 @@ Caps are read from the environment so they are one place, not scattered:
   CG_CAP_NESTING=1 CG_CAP_LOOP_BODY=8
   CG_CAP_PARAMS=4 CG_CAP_PARAMS_WARN=3
   CG_CAP_PUBLIC=7 CG_CAP_PUBLIC_WARN=5
+  CG_CAP_FOLDER=7 CG_CAP_FOLDER_WARN=5
+
+folder_files counts the code files DIRECTLY in one folder. Subfolders are never counted — a folder
+may hold any number of folders, and nesting is the remedy the cap asks for. `.tf`/`.tfvars` are
+excluded (in Terraform the directory IS the module, so the remedy is illegal) and so are `.h`/`.hpp`
+(a header declares the answer its source defines). The reported path ends in `/` and line is 1: a
+directory has no line. Exempt a folder with `codegraph:exempt folder_files -- <reason>` in a
+`.codegraph-exempt` file inside it — a directory has no declaration to put a pragma above.
 
 Nesting is measured FROM THE METHOD BODY: the outermost construct is depth 0, so `for` + `if` is
 depth 1 and legal, and only a third level breaches. See SKILL.md "Hard limits".
@@ -155,6 +167,12 @@ while IFS= read -r f; do
   [ "$n" -gt "$CAP_FILE_WARN" ] || continue
   classify_length "$(jstr "${f#"$ROOT"/}")" "$f" "$n"
 done <"$TMP/code.txt"
+
+# ---- files per folder: the same list, grouped by directory instead of read per file -------------
+# Runs before the language scanners so a folder finding is present even when every scanner degrades:
+# the tree's shape is measurable from the file list alone, and it is the finding that most often
+# explains the others (a 30-file folder is where the 400-line files accumulate).
+scan_folders
 
 # ---- python: exact, via the AST. No heuristic can match it, so prefer it hard. ----
 FIDELITY="${FIDELITY_FORCED:-native}"

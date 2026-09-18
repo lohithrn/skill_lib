@@ -556,7 +556,7 @@ check_documented_caps_keys_carry_a_severity() {
   local out
   out=$(cd "$ROOT" && python3 - ./md_*/ <<'PY'
 import os, re, sys
-METRICS = {"file_lines", "method_lines", "nesting", "loop_body", "else", "params",
+METRICS = {"file_lines", "folder_files", "method_lines", "nesting", "loop_body", "else", "params",
            "public_members", "unparseable", "exempt_without_reason", "unbalanced_braces"}
 SEV = ("_minor", "_major", "_exempt")
 KEY = re.compile(r'"([a-z_]+)"\s*:')
@@ -827,6 +827,32 @@ PY
   # can only be measured if it was enumerated at all. 260 > the 250 hard cap, no imports, so the
   # cycle fixture above is unaffected.
   python3 -c 'open("'"$FIXTURE"'/pkg_a/long.py","w").write("x = 1\n" * 260)'
+  # folder_files is the only cap whose subject is a DIRECTORY, so it is the only one that can be
+  # lost without any file changing. Three folders, one per outcome, none of them importing anything,
+  # so the cycle fixture above still reports exactly one SCC:
+  #   wide/       9 code files -> major        (over the 7 hard cap)
+  #   wide/deep/  9 code files -> major of its OWN, and it must NOT add to wide/'s count. This pair
+  #                               is what pins "subfolders are never counted": without a folder that
+  #                               has both direct files and a code-bearing subfolder, a build that
+  #                               counted subfolders would still pass every other assertion here.
+  #   exempted/   9 code files -> exempt       (.codegraph-exempt names the metric and gives a reason)
+  #   sloppy/     9 code files -> major AND one exempt_without_reason record: a marker naming the
+  #                               metric with no reason after `--` suppresses nothing, exactly as a
+  #                               reasonless source pragma does not suppress a file-level cap.
+  #   infra/      9 .tf files  -> not counted  (in Terraform the directory IS the module, so the
+  #                                             remedy this cap asks for does not exist there)
+  mkdir -p "$FIXTURE"/wide/deep "$FIXTURE"/exempted "$FIXTURE"/sloppy "$FIXTURE"/infra
+  local i
+  for i in 1 2 3 4 5 6 7 8 9; do
+    printf 'w = %s\n' "$i" > "$FIXTURE/wide/answer_$i.py"
+    printf 'd = %s\n' "$i" > "$FIXTURE/wide/deep/answer_$i.py"
+    printf 'e = %s\n' "$i" > "$FIXTURE/exempted/answer_$i.py"
+    printf 's = %s\n' "$i" > "$FIXTURE/sloppy/answer_$i.py"
+    printf 'variable "v%s" {}\n' "$i" > "$FIXTURE/infra/v$i.tf"
+  done
+  printf 'codegraph:exempt folder_files -- 9 payment providers: one question, nine total answers\n' \
+    > "$FIXTURE/exempted/.codegraph-exempt"
+  printf 'codegraph:exempt folder_files\n' > "$FIXTURE/sloppy/.codegraph-exempt"
 }
 
 check_caps_finds_known_violations() {
@@ -851,6 +877,59 @@ bad = [k for k, v in need.items() if int(t.get(k, 0)) < v]
 if bad:
     print("under-reported:", bad, "got:", {k: t.get(k) for k in need}, file=sys.stderr)
     raise SystemExit(1)
+PY
+}
+
+check_caps_measures_folder_fan_out() {
+  # Four properties, and none of them survives on its own: the cap fires, a folder exemption is
+  # counted-and-reported rather than dropped, a directory-as-module language is left alone, and
+  # SUBFOLDERS ARE NEVER COUNTED. The last one is the whole design — depth is the remedy, so a
+  # build that counted subfolders would punish the fix and every deep tree would be a violation.
+  local script="$ROOT"/md_*/scripts/caps.sh
+  # shellcheck disable=SC2086
+  set -- $script
+  [ -f "${1:-}" ] || { info "no caps.sh to test"; return; }
+  local out
+  out=$(bash "$1" --root "$FIXTURE" --json 2>/dev/null) || { fail "caps.sh exited non-zero"; return; }
+  python3 - <<'PY' "$out" && pass "caps.sh counts files per folder, exempts with a reason, skips .tf, ignores subfolders" \
+                          || fail "caps.sh mismeasured folder fan-out"
+import json, sys
+d = json.loads(sys.argv[1])
+t, v = d.get("totals", {}), d.get("violations", [])
+folders = [r for r in v if r.get("metric") == "folder_files"]
+by_file = {r["file"]: r for r in folders}
+err = []
+if t.get("worst_folder_files", 0) != 9:     err.append(f"worst_folder_files is {t.get('worst_folder_files')}, want 9")
+if t.get("folder_files_exempt", 0) < 1:     err.append("exempted/.codegraph-exempt did not yield severity 'exempt'")
+for folder, want in (("wide/", "major"), ("wide/deep/", "major"),
+                     ("exempted/", "exempt"), ("sloppy/", "major")):
+    got = by_file.get(folder, {}).get("severity")
+    if got != want:
+        err.append(f"{folder} severity is {got!r}, want {want!r}")
+# THE assertion. wide/ holds exactly 9 files of its own and a subfolder holding 9 more; a build that
+# counted subfolders reports 18 here and every other check in this function still passes. Pinning the
+# exact value is what makes "depth is free" a tested property rather than a comment.
+if by_file.get("wide/", {}).get("value") != 9:
+    err.append(f"wide/ value is {by_file.get('wide/', {}).get('value')}, want exactly 9 — "
+               "its subfolder's 9 files are being counted against it")
+if by_file.get("wide/deep/", {}).get("value") != 9:
+    err.append("wide/deep/ was not measured in its own right")
+if "infra/" in by_file:
+    err.append("infra/ (9 .tf files) was counted; the directory IS the module there")
+# Nothing in the fixture puts a code file at the root, so the root must not appear at all — a
+# build that rolled subfolder files up to their ancestors would flag it.
+if "./" in by_file or "." in by_file:
+    err.append("the repo root was flagged, so subfolders are being counted as files")
+if not all(r.get("line") == 1 for r in folders):
+    err.append("a folder record has no line: 1, and a directory has no other line to give")
+# A reasonless marker must suppress nothing AND say so, the same way a reasonless source pragma does.
+if t.get("exempt_without_reason_major", 0) < 1:
+    err.append("sloppy/.codegraph-exempt has no reason but produced no exempt_without_reason record")
+if not any(r.get("metric") == "exempt_without_reason" and r.get("name") == "folder_files"
+           and r.get("file") == "sloppy/" for r in v):
+    err.append("the exempt_without_reason record does not name folder_files at sloppy/")
+if err:
+    print(*err, sep="\n", file=sys.stderr); raise SystemExit(1)
 PY
 }
 
@@ -1266,7 +1345,7 @@ check_copied_caps_agree_across_skills() {
   fi
   # Normalize a markdown cap row to "label|warn|hard": drop bold, backticks and the resolution cell.
   local norm='
-    /^\| *(File length|Method length|Nesting depth in a method|Loop body length|`?else`?|Parameters|Public members per class)/ {
+    /^\| *(File length|Code files directly in one folder|Method length|Nesting depth in a method|Loop body length|`?else`?|Parameters|Public members per class)/ {
       gsub(/\*\*/, ""); gsub(/`/, "");
       split($0, c, "|");
       for (i = 2; i <= 4; i++) { gsub(/^ +| +$/, "", c[i]) }
@@ -1336,6 +1415,7 @@ check_copied_caps_agree_across_skills
 head2 "BEHAVIOR"
 make_fixture
 check_caps_finds_known_violations
+check_caps_measures_folder_fan_out
 check_graph_finds_known_cycle
 check_graph_cycles_mode_agrees_with_full
 check_graph_resolves_bare_sibling_imports

@@ -1,10 +1,10 @@
 ---
 name: md_codegraph
-description: Read a codebase as a dependency graph, then restructure it so every conflict becomes an interface, every interface has replaceable implementations wired at one composition root, and the folder tree IS the graph. Enforces hard caps (250-line files, 25-line methods, 1 nesting level, 8-line loop bodies, no else), responsibility-based file naming, traceback-bearing error handling, a contract-test suite per interface, and executable architecture-fitness tests.
+description: Read a codebase as a dependency graph, then restructure it so every conflict becomes an interface, every interface has replaceable implementations wired at one composition root, and the folder tree IS the graph. Enforces hard caps (250-line files, 7 code files per folder with unlimited subfolders, 25-line methods, 1 nesting level, 8-line loop bodies, no else), responsibility-based file naming, traceback-bearing error handling, a contract-test suite per interface, and executable architecture-fitness tests. Asks whether to read the uncommitted diff, a commit range, or the whole tree before it measures anything.
 when_to_use: Only when explicitly invoked as /md_codegraph. Never auto-trigger.
 disable-model-invocation: true
-argument-hint: "nothing — or [analyze|spec|verify|apply|fitness|review] [path] to force a phase"
-allowed-tools: Read, Grep, Glob, Write, Edit, TodoWrite, Agent, Bash(mkdir:*), Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git add:*), Bash(git commit:*), Bash(git checkout:*), Bash(git switch:*), Bash(git revert:*), Bash(bash ${CLAUDE_SKILL_DIR}/scripts/*)
+argument-hint: "nothing — or [analyze|spec|verify|apply|fitness|review] [path] [diff|staged|all|<rev>..<rev>]"
+allowed-tools: Read, Grep, Glob, Write, Edit, TodoWrite, Agent, AskUserQuestion, Bash(mkdir:*), Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git add:*), Bash(git commit:*), Bash(git checkout:*), Bash(git switch:*), Bash(git revert:*), Bash(bash ${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
 # /md_codegraph
@@ -15,8 +15,7 @@ skill is built the way it tells you to build; read `references/doctrine.md` firs
 
 ## The gate — read this first
 
-**Phase 2 is a hard stop.** Nothing on disk is edited until the user approves
-`.codegraph/restructure.md`.
+**Phase 2 is a hard stop.** Nothing on disk is edited until the user approves `.codegraph/restructure.md`.
 
 - `analyze`, `review`, `spec`, `verify` are **read-only** outside `.codegraph/`.
 - `apply` requires an approved spec with a checked approval block. Without one it **refuses**, says
@@ -47,7 +46,13 @@ exception — two files, `analyze.md` then `spec.md`, in that order and never in
 spec ⇒ analyze then spec · unchecked approval block ⇒ re-print the gate and stop · approved spec with
 slices left ⇒ apply the next one, naming it · all slices applied ⇒ verify. State which case was found
 and the job it selected in one line before starting. A job token overrides that choice; an
-unrecognised first token is a path, not an error.
+unrecognised first token is a path, not an error — unless it is a scope token, which is a scope.
+
+**Scope is asked, not assumed.** `analyze` and `review` read the repo's state, recommend one of
+**uncommitted diff · commit or range · whole tree**, and ask once with `AskUserQuestion` before measuring
+anything. A scope token anywhere in `$ARGUMENTS` (`diff` · `staged` · `all` · any `<rev>..<rev>`) is the
+answer, skips the question, and is **never** read as a path; `spec`, `verify` and `apply` inherit
+`.codegraph/scope.json`, re-derive it silently when it is gone, and never re-ask. `jobs/analyze.md` §Phase 0a.
 
 ---
 
@@ -91,33 +96,29 @@ its `CG_CAP_*` env var. Report every breach with `file:line` and the measured nu
 | Limit | Warn | **Hard** | Resolution |
 |---|---|---|---|
 | File length | 200 | **250 lines** | split by responsibility; extract resolvers to a subfolder |
+| Code files directly in one folder | 5 | **7** | name the questions hiding in the flat list, one subfolder each — **subfolders themselves are never counted**, and a total resolver set is `exempt`, not a breach (`references/doctrine.md` §4, §9 item 7) |
 | Method length | 15 | **25 lines** | extract a *named* method, or promote the branch to a port |
-| Nesting depth in a method | — | **1** | guard clauses, or extract the inner block to a named method |
+| Nesting depth in a method | — | **1**, measured from the method body | guard clauses, or extract the inner block to a named method — `for` + `if` is depth 1 and legal, a third level is not |
 | Loop body length | — | **8 lines** | extract the body: the loop shows repetition, the method shows per-item behaviour |
-| `else` / `elif` | — | **0** outside a registry literal | registry, chain, or Null Object |
+| `else` / `elif` | — | **0** outside a registry literal | registry, chain, or Null Object — a registry literal and a compiler-checked exhaustive match over a sealed/ADT set are **data**, not branches |
 | Parameters | 3 | **4**, or 1 Context | introduce a Context |
 | Public members per class | 5 | **7** | split by reason-to-change |
 
-Hard too, measured by another dimension, not `caps.sh`: **3** methods per port and hierarchy depth
-**2** (`port`) · **0** module-graph cycles, from `graph.sh` (`graph`) · **1** composition root per
-deployable (`di`) · **0** ports without a contract suite (`test`) · **0** swallowed exceptions
-(`err`). A fitness test asserts each against the tool that emits it.
+Hard too, measured by another dimension, not `caps.sh`: **3** methods per port and hierarchy depth **2**
+(`port`) · **0** module-graph cycles, from `graph.sh` (`graph`) · **1** composition root per deployable
+(`di`) · **0** ports without a contract suite (`test`) · **0** swallowed exceptions (`err`). A fitness
+test asserts each against the tool that emits it.
 
 **Warn vs hard.** A warn breach is a **minor**, batched, never its own slice; a hard breach is a
 **major** and must appear in the spec. Fitness tests assert the **hard** column only (`*_major`).
 
-Exempt from the `else` rule: a registry literal in the composition root, and an exhaustive match over
-a sealed/ADT set the compiler checks. Both are data. **Nesting is measured from the method body**, so
-`for` + `if` is depth 1 and legal, a third level is not, and a guard clause removes nesting.
-
-**File length is measured on code files only** — the cap is a claim about how much *code* one file
-may hold, and firing it on a README teaches a reader to ignore the tool. Scope: `references/laws.md` §8.
-
-**A breach may be declared exempt in the source** with `# codegraph:exempt <metrics> -- <reason>`
-above the declaration — or, for `file_lines`, in the first 20 lines of the file, since a file has no
-declaration. Seam, not hole: it must name each metric and carry a reason, a reasonless one suppresses
-nothing and is reported as `exempt_without_reason`, and the breach is still printed with
-`"severity": "exempt"`. The bar is a **citation**. Mechanism: `references/laws.md` §8.
+**Two scope rules stop false findings; `references/laws.md` §8 is their one home.** (1) `file_lines` and
+`folder_files` see **code files only** — and `folder_files` also skips `.tf`/`.tfvars`, where the
+directory *is* the module, and `.h`/`.hpp`, where a header is its source's answer. (2) A breach is
+**exempt** only with `codegraph:exempt <metrics> -- <reason>` — above the declaration, in a file's first
+20 lines for `file_lines`, in a folder's `.codegraph-exempt` for `folder_files`. Seam, not hole: it names
+each metric, it carries a reason or suppresses nothing, and the breach still prints. The bar is a
+**citation**.
 
 ---
 
@@ -126,10 +127,9 @@ nothing and is reported as `exempt_without_reason`, and the breach is still prin
 1. **Read before ruling.** Never emit a finding from a filename or a grep hit alone. Open the range.
 2. **The Iron Law of findings.** No finding without all seven fields of `specs/finding.md`; one with no
    consequence and no remedy is noise and is dropped.
-3. **Headroom is not a defect.** "The current value is the loosest possible", "you collapsed X into
-   one value", env-scoped names sharing a value, a mode knob with one mode, a per-stage resource
-   pointing at one target — deliberate seams. Record as `DEFERRED CONFLICT`, never simplify away,
-   and when unsure whether a seam is intentional, ask.
+3. **Headroom is not a defect.** "The current value is the loosest possible", "you collapsed X into one
+   value", env-scoped names sharing a value, a mode knob with one mode, a per-stage resource pointing at
+   one target — deliberate seams. Record as `DEFERRED CONFLICT`, never simplify away; when unsure, ask.
 4. **Measure, don't estimate.** Every number came from a command that ran; a metric no tool produced
    is omitted and listed under `degraded`, never zeroed.
 5. **The oracle rules.** Refinement is gated on the suite, `caps.sh`, `graph.sh`, the type checker
@@ -157,8 +157,9 @@ nothing and is reported as `exempt_without_reason`, and the breach is still prin
     safelist in `references/dead-code.md` first — entry points, reflection, plugin registries,
     config dispatch, generated code, migrations. Unconfirmed ⇒ `suspicious`, not removed.
 16. **Abstraction must pay for itself.** An interface, folder or registry ships only if it removes real
-    duplication, isolates real variation, improves testability, protects a boundary, or kills a
-    growing selection branch. `ThingInterface` + `DefaultThing` alone is a **finding**.
+    duplication, isolates real variation, improves testability, protects a boundary, or kills a growing
+    selection branch. `ThingInterface` + `DefaultThing`, or a subfolder added only to get a count down,
+    is a **finding**.
 
 ## Fan-out contract
 
@@ -172,11 +173,11 @@ Heavy work runs in subagents so its tool output never enters this conversation.
 - Bundled agents: `codegraph-cartographer` (graph), `codegraph-inspector` (one dimension),
   `codegraph-architect` (target tree), `codegraph-adversary` (attack), `codegraph-surgeon` (one slice).
   Not installed ⇒ `general-purpose` with the job file inlined.
-- **Cannot fan out** (no `Agent` tool, or parallel launch fails)? Run the dimensions **serially in
-  this order** — `caps`, `graph`, `err`, `cond`, then the rest — one at a time, discarding each
-  dimension's bulk output before the next, and say `fan-out unavailable: ran N dimensions
-  serially` in the verdict line. Fewer dimensions honestly reported beats a pipeline that
-  refuses to start; the four named first are the ones with a script or a grep behind them.
+- **Cannot fan out** (no `Agent` tool, or parallel launch fails)? Run the dimensions **serially in this
+  order** — `caps`, `graph`, `err`, `cond`, then the rest — one at a time, discarding each one's bulk
+  output before the next, and say `fan-out unavailable: ran N dimensions serially` in the verdict line.
+  The four named first have a script or a grep behind them, and fewer dimensions honestly reported
+  beats a pipeline that refuses to start.
 - The final message is the ≤25-line summary from `specs/graph-report.md` §3 plus one next action.
   Never paste a full report into the conversation.
 
@@ -187,27 +188,26 @@ A violation or a cycle is **data**: exit 0. Exit 2 means the scan could not run 
 where the output must not be read as a result. A path is an option value, never a positional.
 
 **Resolve the skill directory once, in phase 0, and record the ABSOLUTE command in
-`.codegraph/oracle.json`.** Try `${CLAUDE_SKILL_DIR}`, then the directory holding this
-`SKILL.md`; first one with a `scripts/caps.sh` wins. Later phases
-and subagents run the recorded string — an unexpanded `${...}` becomes `bash /scripts/…` elsewhere.
+`.codegraph/oracle.json`.** Try `${CLAUDE_SKILL_DIR}`, then the directory holding this `SKILL.md`; first
+one with a `scripts/caps.sh` wins. Later phases and subagents run the recorded string — an unexpanded
+`${...}` becomes `bash /scripts/…` elsewhere.
 
 Start with `bash <skill-dir>/scripts/caps.sh --help` and the same for `graph.sh`.
 
 | Script | Emits | Contract |
 |---|---|---|
-| `scripts/caps.sh` | file lines, method lines, nesting, loop bodies, `else`, params, public members | `codegraph-caps/1` |
+| `scripts/caps.sh` | file lines, files per folder, method lines, nesting, loop bodies, `else`, params, public members | `codegraph-caps/1` |
 | `scripts/graph.sh` | nodes, edges, cycles (Tarjan) + shape, fan-in/out, I/A/D, PageRank, propagation cost, port health | `specs/graph-report.md` |
 | `scripts/graph.sh --cycles` | the cycle slice of the same artifact, `--json` or `--text` | same, projected |
 
-`--cycles` answers the refine loop's one question, "did this slice remove the cycle?" — a
-**projection, never a second measurement**, carrying `fidelity`/`degraded` through.
+`--cycles` answers the refine loop's one question, "did this slice remove the cycle?" — a **projection,
+never a second measurement**, carrying `fidelity`/`degraded` through.
 
-**Fidelity is reported, never assumed.** Python is AST-exact and Go uses `go list` when the toolchain
-and a `go.mod` are present; TypeScript/JS and Java/Kotlin are a **lexical import sweep**, so aliases
-beyond `@/`, wildcard imports and same-package references are not edges. Every caveat lands in
-`degraded`, every unmeasurable metric is **omitted, not zeroed**, a lexical graph may not claim "0
-cycles" without saying so in the verdict line, and **0 edges with unresolved imports is a failed
-scan, not an acyclic repo** — the scripts say so themselves in `degraded`.
+**Fidelity is reported, never assumed.** Python is AST-exact and Go uses `go list` when the toolchain and
+a `go.mod` are present; TypeScript/JS and Java/Kotlin are a **lexical import sweep**, so aliases beyond
+`@/`, wildcard imports and same-package references are not edges. Every caveat lands in `degraded`, every
+unmeasurable metric is **omitted, not zeroed**, a lexical graph may not claim "0 cycles" without saying so
+in the verdict line, and **0 edges with unresolved imports is a failed scan, not an acyclic repo**.
 
 Dependency set: `python3`, `awk`, `grep`, `git`. Nothing is installed, nothing is fetched.
 
@@ -243,8 +243,8 @@ dimension) · `graph-report.md` (analyze output + the ≤25-line summary) · `re
 - [ ] Every number in the output came from a command that ran
 - [ ] Every finding has all seven fields and survived verification
 - [ ] Headroom was recorded as `DEFERRED CONFLICT`, promoted out of `.codegraph/`, and not called debt
-- [ ] No file was edited before the approval block was checked
-- [ ] Tests were green before and after every applied slice
+- [ ] The scope was asked or inherited — never assumed — and the verdict line says which one ran
+- [ ] No file was edited before the approval block was checked, and tests were green around every slice
 - [ ] Every port has an `Absent` resolver, a contract suite and a registration test
 - [ ] `tests/fitness/` enforces every graph claim the spec made
 - [ ] The conversation got a ≤25-line summary, one next action, and what it does not cover

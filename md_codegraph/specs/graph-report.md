@@ -84,6 +84,12 @@ The orchestrator returns **≤ 25 lines** to the conversation. Bulk stays on dis
     // `*_major == 0` without knowing which metrics exist. Never `files_over_250` — that spells a
     // threshold into a key name, and CG_CAP_FILE is meant to move it.
     "file_lines_minor": 31, "file_lines_major": 12, "worst_file_lines": 612,
+    // `folder_files` is the one metric whose subject is a directory: its records carry a trailing
+    // `/` on the path and `line: 1`, because a folder has no line. It is also the one metric a SOURCE
+    // pragma cannot exempt — only `<folder>/.codegraph-exempt` can, since there is no declaration to
+    // sit above. Either way `_exempt` still counts the breach; an exemption is never a deletion.
+    "folder_files_minor": 6, "folder_files_major": 2, "folder_files_exempt": 1,
+    "worst_folder_files": 19,
     "method_lines_minor": 208, "method_lines_major": 74, "worst_method_lines": 141,
     "nesting_major": 96, "worst_nesting": 6,
     "loop_body_major": 42, "worst_loop_body": 35,

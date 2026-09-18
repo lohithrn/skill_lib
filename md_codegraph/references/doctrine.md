@@ -167,6 +167,14 @@ Rules:
   itself contains a conflict — recurse.
 - **Nothing outside the composition root and the registry may import a resolver module.**
   Enforced as a layer-4 fitness test, not a habit.
+- **A total answer set outranks the folder cap.** `sources/` above holds four answers because the
+  question has four; nine providers means nine files, and that is §9's fan-out cap being *measured*
+  rather than breached. What it must never buy is a fake middle layer — `sources/group_a/`,
+  `sources/misc/` — invented to get a number down. The sibling set is one answer set: keep it flat,
+  put the reason in `sources/.codegraph-exempt`, and the report prints it as `exempt` with your
+  sentence attached (`references/laws.md` §8 rule 2). What the cap **is** catching is the other
+  case: a folder whose files answer *different* questions, which is a missing subfolder, not a
+  missing exemption.
 
 ### Decorators, not flags
 
@@ -320,6 +328,19 @@ Consequences, all machine-checkable:
    inflates every metric this skill measures: it adds fan-in that no caller depends on, it makes
    a dead module look live, and it ships in the artifact where it is dependency surface with no
    owner. See `references/testing-hierarchy.md` §2 for where the tests go instead.
+7. **A folder holds few enough answers that its name still predicts them.** Measured as
+   `folder_files`: **5 warn / 7 hard** on the code files *directly* in a folder, and **no limit at
+   all on subfolders** — a folder may hold twenty folders and two files. This follows from 1 and 2
+   with nothing added: if a folder is a question and a file is an answer, then nineteen files under
+   one folder is a question with nineteen answers, which is almost always several questions nobody
+   has named yet. The remedy is therefore a **name**, not a move: find the questions hiding in the
+   list, name one subfolder per question, and the files sort themselves. A move without a naming
+   decision (`handlers/part2/`, `services/other/`) satisfies the number and destroys the property
+   the number exists to protect. Two cases are not breaches, and they are not-breaches in different
+   ways: a language where the directory *is* the unit (`.tf`/`.tfvars`, `.h`/`.hpp`) is **excluded by
+   the tool**, never counted and so never in need of a citation — reporting one is a fabricated
+   finding; a **total resolver set (§4)** *is* counted, and that is the one case a
+   `.codegraph-exempt` citation exists for.
 
 This is the whole of "code should feel like a knowledge graph." Traversing folders is
 traversing the question/answer graph, and layer-4 fitness tests assert the traversal is legal.

@@ -79,6 +79,15 @@ mismatch between the grouping and the existing folders **is** the tree proposal;
 not invented, and a Q value no tool printed is never quoted. Every line marked `[new]` needs a one-line reason; every `[moved from]` needs a
 source; every `[deleted]` needs the finding ID that justifies it.
 
+**The target tree is measured, not just drawn.** Count the code files the tree puts *directly* in each
+folder: over **7** is a proposal that ships a `folder_files` major on day one, and the architect fixes
+it in the design rather than leaving it for a later slice. Subfolders are free — the tree may nest as
+deep as the questions go. Two things are **rejected** rather than accepted with a caveat: a folder whose
+name does not predict its files (`core/`, `services/other/`, `handlers/part2/` — a number lowered with no
+question named), and a total answer set split to satisfy the count (nine providers belong in one flat
+folder with the reason in its `.codegraph-exempt`, per `../references/doctrine.md` §4). The tree's
+folder names are the questions; if a folder is over the cap, one of its questions has no name yet.
+
 ---
 
 ## Phase 2c′ — design it twice (opt-in, one cluster per run)

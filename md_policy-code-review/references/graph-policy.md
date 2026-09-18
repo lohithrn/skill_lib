@@ -15,8 +15,9 @@ Machine-checked. Report every breach with `file:line` and the measured number.
 | Metric | Warn | **Hard** | Resolution |
 |---|---|---|---|
 | File length | 200 | **250 lines** | split by responsibility; extract resolvers to a subfolder |
+| Code files directly in one folder | 5 | **7** | name the questions hiding in the flat list, one subfolder each — subfolders themselves are never counted |
 | Method length | 15 | **25 lines** | extract a *named* method, or promote the branch to a port |
-| Nesting depth in a method | — | **1** | guard clauses, or extract the inner block to a named method |
+| Nesting depth in a method | — | **1**, measured from the method body | guard clauses, or extract the inner block to a named method |
 | Loop body length | — | **8 lines** | extract the body: the loop shows repetition, the method shows per-item behaviour |
 | `else` / `elif` | — | **0** outside a registry literal | registry, chain, or Null Object |
 | Parameters | 3 | **4**, or 1 Context | introduce a Context |
@@ -26,14 +27,26 @@ Machine-checked. Report every breach with `file:line` and the measured number.
 
 **Warn breach ⇒ `minor`. Hard breach ⇒ `major`. Hard breach at ≥2× the cap ⇒ still `major`, but
 first within its severity.** Nesting is measured **from the method body**, so `for` + `if` is depth 1
-and legal and a guard clause removes nesting. File length is measured on **code files only** —
-firing it on a README teaches a reader to ignore the tool.
+and legal and a guard clause removes nesting. File length and folder fan-out are measured on **code
+files only** — firing them on a README teaches a reader to ignore the tool.
+
+**Folder fan-out counts files, never folders**, because depth is the remedy and a cap on depth would
+punish the fix: a folder may hold any number of subfolders. It also skips `.tf`/`.tfvars`, where the
+directory *is* the module, and `.h`/`.hpp`, where a header declares what its source answers — those are
+**excluded from the count, so they can never breach and never need a citation**; a `folder_files` finding
+on a Terraform module or a C/C++ header folder is fabricated, not measured. The one case that is counted
+and still not a defect is a **total answer set** — nine providers answering one question is the fan-out
+being measured, not breached — and that is what the `<folder>/.codegraph-exempt` citation is for. A
+subfolder invented only to get a
+count down — `part2/`, `other/`, `misc/` — is itself a finding: it satisfies the number and destroys
+the property the number exists for.
 
 Exempt from the `else` rule: a registry literal in the composition root, and an exhaustive match
 over a sealed/ADT set the compiler checks. Both are data.
 
 **A breach may be declared exempt in the source** with `# codegraph:exempt <metrics> -- <reason>`
-above the declaration, or in the first 20 lines for a whole-file cap. It must name each metric and
+above the declaration, in the first 20 lines for a whole-file cap, or — for a folder, which has no
+declaration to sit above — in a `.codegraph-exempt` file inside it. It must name each metric and
 carry a reason; a reasonless one suppresses nothing. The breach is still reported, at severity
 `exempt`. The bar is a citation, not a mood.
 

@@ -7,7 +7,75 @@ conversation. Contracts: `../specs/graph-report.md` and `../specs/finding.md`.
 
 ---
 
-## Phase 0 — scope, cheaply
+## Phase 0a — scope: three answers, and you ask for one
+
+Settle **how much of the repo this run is about** before measuring anything. It changes every number
+that follows, and it is not inferable from the invocation.
+
+| Scope | What it reads | The question it answers |
+|---|---|---|
+| `diff` | `git diff --name-only HEAD`, plus untracked files from `git status --short` | "is what I am about to commit sound?" |
+| | *(before the first commit `HEAD` does not exist and that command is fatal — derive the list from `git status --short` alone)* | |
+| `<rev>..<rev>` | `git diff --name-only <range>` — a commit, a branch, a PR | "is this change sound?" |
+| `all` | everything phase 0 lists | "how does this codebase hold up?" |
+
+`staged` is `diff` narrowed to `git diff --name-only --cached`.
+
+**Detect first, then ask.** A question with no hint in it hands the decision to the user with nothing
+to decide on. Two commands, one batch:
+
+1. `git status --short` → `N` changed or untracked files. This one works in every git repo, including
+   one with no commits yet, so it is the detection that never needs a fallback.
+2. `git log --oneline <trunk>..HEAD` → `M` commits not on the trunk. Resolve `<trunk>` with
+   **`git symbolic-ref --short refs/remotes/origin/HEAD`**, which prints the branch on success and
+   *nothing* on failure — do not use `git rev-parse --abbrev-ref origin/HEAD`, which echoes the literal
+   string `origin/HEAD` back at you, so its output cannot tell you whether it resolved. Empty output ⇒
+   try `main`, then `master`. No trunk resolves, or `HEAD` has no commits ⇒ **`M` is not measured**, and
+   the range row is dropped from the table rather than recommended against an unknown base.
+
+Then recommend — first row that matches wins:
+
+| State | Recommend | The hint you show |
+|---|---|---|
+| `N > 0` | `diff` | "7 uncommitted files — review those?" |
+| `N = 0`, `M > 0` | `<trunk>..HEAD` | "clean tree, 3 commits ahead of `main` — review the branch?" |
+| `N = 0`, `M = 0` | `all` | "nothing in flight, so the whole tree is the only scope left" |
+
+Ask with **one** `AskUserQuestion`: all three offered, the recommended one first and labelled as
+recommended, the counts in the descriptions. Then run. Never ask twice, and never re-ask in a later phase.
+
+**Do not ask at all** in these cases — say in one line which one applied:
+
+- a scope token is in `$ARGUMENTS` (`diff` · `staged` · `all` · anything with `..` in it, or anything
+  `git rev-parse` resolves) — the user has already answered;
+- a path narrower than the repo root was given: **that** is the scope;
+- `.codegraph/scope.json` is inheritable — `spec`, `verify` and `apply` take this branch and never ask.
+  It is inheritable when its sha is HEAD, **and also when HEAD moved because `apply` committed slices of
+  the spec this run is working through**: that is the run advancing, not a stale artifact. If it is
+  missing (a `review` run disposed of `.codegraph/`, or `spec` was invoked days later) or its sha is
+  unrelated to this spec, **re-derive it silently from its own recorded git command and say so in one
+  line** — do not ask, because the scope was already chosen once and a second question would invite a
+  different answer than the spec was written against. Only a *stale graph* stops the run (§Refusals);
+  a stale scope is re-derivable;
+- no `AskUserQuestion` tool, or not a git repository — `analyze` takes `all`, `review` takes `diff`, and
+  the verdict line names the default and why it was taken;
+- `N = 0` and `M = 0` — the third row is not a choice, it is the only answer. State it and go.
+
+**Record it in `.codegraph/scope.json`**: `mode` (`diff`|`staged`|`range`|`all`), the exact git command,
+its output as `files[]`, and the sha. Every dimension agent gets this file and rules on nothing outside
+`files[]` plus their direct importers.
+
+**A narrowed scope narrows the report, never the measurement.** `caps.sh` and `graph.sh` have no diff
+mode, and a graph built from the changed files alone is a *different graph* — the importer outside the
+diff **is** the blast radius. So measure the whole tree, filter the findings to `files[]` **plus their
+direct importers** — the same set every dimension agent was given, not a narrower one — and say both
+in the verdict line: `scope: diff (7 files) · graph measured whole`. A `folder_files` finding is in scope
+when the diff adds or moves a file in that folder — a folder the change just made too wide is exactly
+what a diff review is for.
+
+---
+
+## Phase 0 — inventory, cheaply
 
 Before spending a single agent, establish the ground truth. One `Bash` batch, one `Glob`.
 
@@ -28,8 +96,10 @@ Before spending a single agent, establish the ground truth. One `Bash` batch, on
 6. **Exclusions.** Vendored code, generated code, migrations, fixtures, `node_modules`, build
    output. List them; they go in the report's "does NOT cover" section.
 
-Write `.codegraph/scope.json`. If the repo is >5k files, ask which subtree to analyze before
-fanning out — a whole-monorepo graph is rarely the question being asked.
+Merge all of it into the `.codegraph/scope.json` phase 0a already wrote — *which* files is settled;
+what phase 0 adds is languages, entry points, oracle and exclusions. If the repo is >5k files and
+phase 0a chose `all`, ask which subtree before fanning out — a whole-monorepo graph is rarely the
+question being asked.
 
 ---
 
@@ -44,7 +114,7 @@ Launch **all** dimension agents **in a single message** so they run concurrently
 | Dim | Agent | Reads | Hunts | Artifact |
 |---|---|---|---|---|
 | `graph` | `codegraph-cartographer` | `graph-tooling.md`, `graph-metrics.md` | cycles, hubs, fan-in/out, I/A/D, centrality, communities vs folders, layer violations | `graph.dim.json` |
-| `caps` | `codegraph-inspector` | `laws.md` | file lines, method lines (15 warn / 25 hard), nesting >1, loop bodies >8, `else`, params, public members, hierarchy depth | `caps.json` |
+| `caps` | `codegraph-inspector` | `laws.md` | file lines, files directly in one folder (5 warn / 7 hard, subfolders uncounted), method lines (15 warn / 25 hard), nesting >1, loop bodies >8, `else`, params, public members, hierarchy depth | `caps.json` |
 | `cond` | `codegraph-inspector` | `doctrine.md` §1, `patterns.md` | every conflict C1–C14, with discriminant, branch count, and repeat sites | `cond.json` |
 | `di` | `codegraph-inspector` | `di-patterns.md` | Control Freak, Service Locator, Ambient Context, Bastard Injection, field injection, multiple roots, container-in-tests | `di.json` |
 | `port` | `codegraph-inspector` | `doctrine.md` §3, `smells.md` | fat ports, ports declared with implementations, missing Absent resolvers, orphan resolvers, Refused Bequest, deep hierarchies | `port.json` |
@@ -168,8 +238,12 @@ Next: /md_codegraph spec   (writes the restructure spec; still no edits)
 `/md_codegraph review [path]` is this job with three changes: no `graph.json` is written (only
 `report.md`), the `time` and `port` dimensions are skipped unless the path is a whole package, and
 the output stops at findings — no communities, no folder proposal, no next-action pointing at
-`spec`. Use it for a PR-sized diff. If the target is a diff, scope every dimension to the changed
-files plus their direct importers, and say so in the report.
+`spec`. Use it for a PR-sized diff. Phase 0a still runs first and still **asks**; the one change is that
+`review`'s fallback when it cannot ask is `diff` rather than `all`. The recommendation table is otherwise
+unchanged, so a clean tree still gets the branch range and a clean tree with nothing ahead still gets
+`all`. Scope every dimension to `files[]` plus their direct importers and say so in the report — and if
+`files[]` comes back **empty**, stop: measuring the whole tree and then filtering every finding away
+produces a report of nothing. Say `no files in scope` and offer `all`.
 
 **`review` ends the run, so it also disposes of `.codegraph/`** — `../references/artifacts.md`
 §Ending a run. Nothing downstream is going to read these measurements: there is no spec to write and
