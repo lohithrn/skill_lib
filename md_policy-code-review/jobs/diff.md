@@ -4,7 +4,11 @@ Read-only. PR-sized: the changed lines, their enclosing functions, and the direc
 whose signature or behaviour moved. `C` runs first, because a correctness bug outranks every
 structural preference in the same file.
 
-Target: `$ARGUMENTS` after the mode token — a git ref, default the merge base with the main branch.
+This is the only mode that runs **both axes**: the standards groups (`C`, then the `R`/`G`/`H` rules the
+change can break) and the spec group `S`, which asks the separate question of whether the change built
+what was asked. They are never merged — `SKILL.md` §Precedence rule 0.
+
+Target: `$ARGUMENTS` after the mode token — a git ref, then optionally a spec path.
 
 ---
 
@@ -30,7 +34,33 @@ Target: `$ARGUMENTS` after the mode token — a git ref, default the merge base 
 6. Write `.policy-review/scope.json`: base and how it was chosen, files by status, added/removed
    counts, importers read, groups applying.
 
+**Fail here, not inside two parallel agents.** Before anything fans out, confirm the base ref resolves
+(`git rev-parse <base>`) and the diff is non-empty. A bad ref discovered by four subagents costs four
+wasted runs and produces four confusing reports.
+
 Nothing changed? Say so in one line and stop. Do not fall through to a whole-tree review.
+
+---
+
+## Phase 0b — The spec source, and the declined KB
+
+Two reads that decide what phases 2 and 3 are allowed to say. Both happen before any finding exists.
+
+1. **Find the spec**, per `references/spec-policy.md` §Phase 0 addition, stopping at the first hit: a
+   path in `$ARGUMENTS` → a spec file in `docs/`, `specs/`, `.scratch/`, `adr/` matching the branch or
+   changed area → the commit message bodies from `git log <base>..HEAD` → an unfetchable issue
+   reference. Record which in `.policy-review/spec.json`, with its path and requirement count.
+   - An issue number with no local text is a **degradation**: this skill has no network by design, so
+     record `S degraded: issue #N referenced, not readable`, run `S` against the commit messages, and
+     say so. Never guess what an issue said from its number.
+   - Nothing found ⇒ `S` does not run. `S not run (no spec source found)` in Groups run, `SPEC-UNKNOWN`
+     as the spec verdict. An absent spec is a fact about the change, not a finding against it.
+2. **Read `.out-of-scope/`** if it exists — every file, per `references/declined.md` §2 — and record
+   the concept count in `scope.json`. Every candidate finding in phase 3 is matched against it by
+   concept, not by string.
+
+Neither read is optional, and neither invents anything: no spec file is created, and `.out-of-scope/`
+is never created unprompted.
 
 ---
 
@@ -42,6 +72,7 @@ Nothing changed? Say so in one line and stop. Do not fall through to a whole-tre
 | `*.tf`, deploy shell, `infra/`, `*_config.sh` | `C` then `H` |
 | a composed name, route, or URL anywhere in source | `H` as well |
 | docs, fixtures, lock files | `C6` only — and a lock-file diff is not a finding |
+| every changed file the spec speaks to | `S` as well, scoped by the *request* rather than the file type |
 
 `G` on a diff is **not** a tree audit: only caps the change breached or worsened, a conflict the
 change added a third branch to, a cycle the change created, a new sideways edge, a port the change
@@ -77,35 +108,74 @@ files.**
 
 Heavy reading fans out per `SKILL.md` §Fan-out contract — one agent per group, single message,
 `.policy-review/<group>.json` as the only writable path, ≤25 lines back. Serial fallback order is
-`C`, `H`, `G`.
+`C`, `H`, `G`, `S`.
+
+---
+
+## Phase 2b — The spec review (`S1`–`S5`)
+
+Runs **in the same fan-out message** as the standards groups, in its own agent, whose prompt carries the
+spec text and `references/spec-policy.md` and nothing else. That isolation is the mechanism: an agent
+holding both the spec and the architecture rules ranks one against the other, which §Precedence rule 0
+forbids.
+
+Enumerate the requirements first — number them, from the spec's own words — then walk the diff against
+the list:
+
+1. **`S1` gaps** — a requirement with no code. Say where you looked; `LOCATION` is the line the check
+   belongs above, never the spec file.
+2. **`S2` unrequested behaviour** — anything in the diff no requirement names. Check `.out-of-scope/`
+   first: rejected behaviour now present is a `blocker` reversal, not creep. Tests are never creep.
+3. **`S3` divergence** — present, plausible, wrong. Values, inverted conditions, right behaviour at the
+   wrong time. Quote both sides. This is the group's most expensive finding.
+4. **`S4` the spec is the problem** — contradictory or ambiguous requirements, a spec that changed after
+   the code. Check the dates before blaming the author, and never pick a winner between two
+   requirements: that is a person's call.
+5. **`S5` observables** — a stated requirement with no test asserting it, or a test written from the
+   code rather than the spec and therefore unable to fail.
+
+Return the requirement roll-up — `met / gapped / divergent / untested` out of N — because that count is
+what the spec verdict is computed from.
 
 ---
 
 ## Phase 3 — Merge, precedence, verdict
 
-1. De-duplicate: one symptom, one suggestion, under the policy whose CONSEQUENCE is worse.
-2. Apply `SKILL.md` §Precedence — bans first, headroom untouched, the stricter cap reported with the
+1. De-duplicate **within each axis, never across them**: one symptom, one suggestion, under the policy
+   whose CONSEQUENCE is worse. A symptom that is both an `S3` divergence and a `C1` bug survives as two
+   entries, each naming the other's ID — the documented exception, and the only one.
+2. **Drop every finding matching a concept in `.out-of-scope/`** (`references/declined.md` §2), matched
+   by concept rather than string. Each suppressed concept gets one line under `## Declined` with its
+   file. A recorded decision you believe is now wrong is a one-line question, never a re-emitted
+   finding.
+3. Apply `SKILL.md` §Precedence — bans first, headroom untouched, the stricter cap reported with the
    looser one named, the repo's enforced gate instead of a finding, and **`C` above `G`/`H`** in the
-   same file.
-3. Separate **introduced** from **pre-existing**. This is the split the author actually needs: a
+   same file. All of that orders the standards axis only; `S` is not in it.
+4. Separate **introduced** from **pre-existing**. This is the split the author actually needs: a
    pre-existing breach the change merely stood next to is listed once, under a `pre-existing` heading,
    and does not count toward the verdict.
-4. Drop the automatic non-suggestions (`specs/suggestion.md` §3). A lock-file change, a formatting-only
+5. Drop the automatic non-suggestions (`specs/suggestion.md` §3). A lock-file change, a formatting-only
    hunk the repo's formatter produced, and a comment rephrasing are not findings.
-5. Every seam the change opens deliberately — an env-scoped name with one value, a knob with one mode,
-   a Context field nothing reads yet — goes to **Deferred conflicts**. Never billed.
-6. Verdict per `specs/suggestion.md` §6, computed over the **introduced** set only, and say so.
+6. Every seam the change opens deliberately — an env-scoped name with one value, a knob with one mode,
+   a Context field nothing reads yet — goes to **Deferred conflicts**. Never billed. Offer once to
+   record confirmed headroom in `.out-of-scope/` so the next run does not re-ask; write nothing without
+   a yes.
+7. **Two verdicts** per `specs/suggestion.md` §6 — standards, computed over the **introduced** set only,
+   and spec, computed from the requirement roll-up. Print both, always, even when one axis did not run.
+   Never collapse them into one word.
 
 ---
 
 ## Phase 4 — Report and summary
 
-1. `.policy-review/report.md`, section order per `specs/suggestion.md` §4, with two additions for
-   this mode: the base ref and how it was chosen goes in **Groups run**, and a `## Pre-existing`
-   section sits after `## Change (C)`.
-2. Return the ≤25-line summary of `specs/suggestion.md` §5, with the counts split
-   `introduced / pre-existing`, plus one next action naming the cheapest blocker.
-3. One line: nothing outside `.policy-review/` was written.
+1. `.policy-review/report.md`, section order per `specs/suggestion.md` §4, with these additions for
+   this mode: the base ref and how it was chosen goes in **Groups run**, a `## Pre-existing` section
+   sits after `## Change (C)`, and `## Spec (S)` follows it — its own section, never folded upward.
+2. Return the ≤25-line summary of `specs/suggestion.md` §5, with the standards counts split
+   `introduced / pre-existing`, **both verdicts**, and the worst finding **per axis**. One next action,
+   naming the cheapest blocker on each axis that has one.
+3. One line: nothing outside `.policy-review/` was written — or, if the user said yes to recording a
+   declined finding, which `.out-of-scope/` file was written and that it belongs in their next commit.
 
 ## Refusals
 
@@ -115,3 +185,9 @@ Heavy reading fans out per `SKILL.md` §Fan-out contract — one agent per group
   base): say which command failed and ask for a base ref. Do not review `HEAD` and call it a diff.
 - Asked to run the repo's tests to check the change: no. Read what they enforce; running them
   executes the code under review.
+- Asked to review against an issue this skill cannot read (`#123`, a tracker URL): say so and ask for
+  the text or a path. Run `S` degraded against the commit messages if there are any. **Never
+  reconstruct a requirement from an issue number** — an invented spec produces `S` findings that are
+  confidently wrong, which is worse than `SPEC-UNKNOWN`.
+- Asked to write `.out-of-scope/` as part of the review itself: no. It is written only after an explicit
+  yes to an explicit offer, and it is a tracked file in the user's repo.

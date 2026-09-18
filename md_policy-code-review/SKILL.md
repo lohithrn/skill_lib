@@ -1,6 +1,6 @@
 ---
 name: md_policy-code-review
-description: Review a codebase or a diff against the whole standing policy at once, and refactor to it when asked — the 40-rule architecture, dependency-injection and maintainability standard (hard caps, constructor injection, registries over branching, typed public APIs, dead-code safelist, the anti-overengineering brakes), CodeGraph structure (conflict→port→resolvers→context, one composition root, no cycles, tracebacks, contract suites), the house conventions (<prefix>_<resource_role>_<company> naming and its 64-char caps, route shape, nothing-hardcoded, one auth gate, epoch-ms data rules, deploy gates), and ordinary change review (correctness, regressions, security, tests). Ships a deterministic linter for the countable rules. Emits suggestions with file:line and a named rule; edits only in refactor mode.
+description: Review a codebase or a diff against the whole standing policy at once, and refactor to it when asked — the 40-rule architecture, dependency-injection and maintainability standard (hard caps, constructor injection, registries over branching, typed public APIs, dead-code safelist, the anti-overengineering brakes), CodeGraph structure (conflict→port→resolvers→context, one composition root, no cycles, tracebacks, contract suites), the house conventions (<prefix>_<resource_role>_<company> naming and its 64-char caps, route shape, nothing-hardcoded, one auth gate, epoch-ms data rules, deploy gates), ordinary change review (correctness, regressions, security, tests), and — on a diff — whether the change actually built what the spec asked, reported as a separate axis so a standards pass cannot mask a spec failure. Ships a deterministic linter for the countable rules. Emits suggestions with file:line and a named rule; edits only in refactor mode.
 when_to_use: Only when explicitly invoked as /md_policy-code-review. Never auto-trigger.
 disable-model-invocation: true
 argument-hint: "nothing — or [review|diff|refactor] [path|git-ref] to force a mode"
@@ -19,7 +19,9 @@ what should change?** No rule text lives here — the rules are in `references/`
 `refactor` is the one mode that may, and only after its own gate clears.
 
 - In `review`/`diff` the only writable location is `.policy-review/` in the analysed repo. Everything
-  else is read.
+  else is read. The **one** exception is `.out-of-scope/`, and only after the user answers yes to an
+  explicit offer to record a declined finding — never on this skill's own initiative, never in the
+  same breath as reporting it. `references/declined.md` §4 is the procedure.
 - Never `push`, `checkout`, `stash`, branch, tag, or revert — in any mode. Never run a formatter, a
   codemod, or a linter's `--fix`. `git add`/`git commit` are for `refactor` mode only, per
   `jobs/refactor-workflow.md`.
@@ -52,10 +54,16 @@ State which case was found and the job it selected in one line before starting.
 
 ---
 
-## The four policy groups
+## The five policy groups — two axes
 
 Every suggestion cites exactly one policy ID from one of these. The IDs are the contract between
 this file, the report, and anyone arguing with a finding.
+
+They sit on **two axes**: **Standards** (`R`/`G`/`H`/`C`) asks *is this code good?*; **Spec** (`S`,
+diff-only) asks *did it build what was asked?* A change can pass one and fail the other, and **a
+standards pass masks a spec failure** — code following all forty rules while implementing the wrong
+feature reads as clean. Hence `S` never merges with the rest: §Precedence rule 0, and
+`references/spec-policy.md` §Axis separation.
 
 | Group | IDs | Owns | Reference |
 |---|---|---|---|
@@ -63,15 +71,21 @@ this file, the report, and anyone arguing with a finding.
 | **Structure** | `G1`–`G10` | hard caps, conflict→port→resolvers→context, composition root, cycles, layer rule, responsibility naming, tracebacks, contract suites, dead code, abstraction that pays | `references/graph-policy.md` |
 | **House** | `H1`–`H12` | resource naming + its length caps, route shape, outbound URL config, nothing-hardcoded, one auth gate, data conventions, compute choice, code size, terraform comments, deploy gates, working rules | `references/house-policy.md` |
 | **Change** | `C1`–`C6` | correctness, regressions, missing error handling, security and data handling, consistency with surrounding code, tests and docs the change owes | `references/change-policy.md` |
+| **Spec** | `S1`–`S5` | ★ the second axis: requirements not delivered, behaviour nothing asked for, requirements implemented differently than specified, a spec that is itself wrong, and how anyone would know it works | `references/spec-policy.md` |
 
-`review` runs Architecture + Structure + House and the parts of Change that do not need a diff.
+`review` runs Architecture + Structure + House and the parts of Change that do not need a diff; **`S`
+cannot run** — there is no change to compare a spec to, and the report says `S not run (no diff)`.
 `diff` runs Change first, then only the Architecture, Structure and House rules the changed lines can
-actually break. `refactor` runs Architecture as the standard it restructures to, with Structure as the
-measurement.
+actually break, then `S` against the spec source found in phase 0. `refactor` runs Architecture as the
+standard it restructures to, with Structure as the measurement.
+
+No spec source found ⇒ `S not run (no spec source found)`, stated out loud: a reader who assumes the
+request was checked is worse off than one who knows it wasn't.
 
 **Which groups apply to a file is decided by what the file is**, never by hope: `*.tf`, deploy
 shell and `infra/` get House; source code gets Architecture + Structure; everything in the diff gets
-Change. A Python service repo gets all four, and the report says so.
+Change. A Python service repo with a diff and a findable spec gets all five, and the report says so.
+`S` is the exception: it is scoped by the *request*, not by file type.
 
 ---
 
@@ -82,6 +96,11 @@ Rules 1 and 2 are not this skill's to trade away — they are the standing doctr
 `references/standing-doctrine.md`, and they outrank every group below **and** any convention a repo
 has adopted locally. That file's third contract is the output contract, which shapes every report this
 skill emits (see §Non-negotiables).
+
+0. **The axes do not compete.** Everything numbered below orders findings *within* the standards axis.
+   `S` is not in that order and is never traded against it. Two verdicts, two sections, two "worst
+   finding" lines. Full rule, including the one cross-axis duplication this licenses:
+   `references/spec-policy.md` §Axis separation.
 
 1. **The global bans win outright.** Never machine-generated certificates or keypairs as an
    authorization mechanism (`H6`); prefer SigV4. No policy below can license one.
@@ -129,6 +148,11 @@ skill emits (see §Non-negotiables).
    decides a split, a file name must survive alone, dependencies arrive through the constructor,
    abstraction must pay for itself, simple code stays simple — are in
    `references/architecture-standard.md` §Non-negotiables and apply in every mode that runs `R`.
+10. **Never re-report a decision the repo already recorded.** Read `.out-of-scope/` in phase 0 and
+    match every candidate finding against it **by concept, not by string**. A match drops the finding
+    and lists the concept once under `## Declined` with its file. Believe a recorded decision is now
+    wrong? Say so in one line and **ask** — never re-emit the finding, never edit the file to agree
+    with yourself. `references/declined.md` is the format and the procedure.
 
 ---
 
@@ -170,13 +194,16 @@ borrowed, and only when it is already on disk.
 Heavy reading runs in subagents so bulk output never enters the conversation.
 
 - One agent per policy group at most, launched **in a single message** so they run concurrently.
+- **`S` runs as its own agent**, its prompt carrying the spec text plus `references/spec-policy.md` and
+  nothing else. An agent holding both the spec and the architecture rules ranks one against the other —
+  context isolation is the mechanism that keeps the axes independent.
 - Every agent writes its artifact to `.policy-review/<group>.json` and returns **≤25 lines**:
   counts, the worst three locations, the single highest-leverage change. Bulk never returns as text.
 - Only read-only agents. `general-purpose` with the group's reference file inlined is the default;
   `codegraph-inspector` and `codegraph-cartographer` are usable for `G` when installed, since
   neither can write outside its artifact directory. **Never `codegraph-surgeon`.**
 - Cannot fan out (no `Agent` tool, or the parallel launch fails)? Run the groups **serially** in
-  the order `C`, `H`, `R`, `G`, discarding each group's bulk before the next, and say
+  the order `C`, `H`, `R`, `G`, `S`, discarding each group's bulk before the next, and say
   `fan-out unavailable: ran N groups serially` in the verdict line.
 - `refactor` does not fan out. One agent editing while another reads the same tree is how a plan and
   its application drift apart.
@@ -194,10 +221,16 @@ Everything lands in `.policy-review/` in the analysed repo, and nothing else is 
 |---|---|
 | `.policy-review/scope.json` | languages, entry points, exclusions, which groups apply and why |
 | `.policy-review/oracle.json` | the exact command behind every number, and whether it ran |
-| `.policy-review/<group>.json` | one per group run: `R`, `G`, `H`, `C` |
+| `.policy-review/<group>.json` | one per group run: `R`, `G`, `H`, `C`, `S` |
+| `.policy-review/spec.json` | the spec source, how it was found, and whether it was readable |
 | `.policy-review/report.md` | the full report, section order per `specs/suggestion.md` §4 |
 
 A `.policy-review/` from a different commit is stale and poisons the report: stop and ask.
+
+**`.out-of-scope/` is the opposite kind of artifact** — read every run, written only on an explicit yes,
+and **committed to the repo**. It is durable precisely because `.policy-review/` is not: a
+`deferred-conflict` recorded only there dies with the directory, so the same seam is re-reported forever.
+`references/declined.md`.
 
 ---
 
@@ -209,6 +242,8 @@ A `.policy-review/` from a different commit is stale and poisons the report: sto
 - [ ] Every number came from a command that ran; unmeasured metrics are in `degraded`
 - [ ] Every suggestion has nine fields, one policy ID, one location, and a real remedy
 - [ ] Precedence conflicts were resolved per §Precedence, naming both numbers
+- [ ] On a diff: the spec source is named or `S not run` says why; `S` got its own section and verdict
+- [ ] `.out-of-scope/` was read, matched by concept, suppressions listed; nothing written without a yes
 - [ ] Headroom is recorded as `deferred-conflict`, not reported as debt
 - [ ] In `review`/`diff`: nothing outside `.policy-review/` was written, and the report says so
 - [ ] In `refactor`: the three-bucket plan came first, and the do-not bucket is populated by name

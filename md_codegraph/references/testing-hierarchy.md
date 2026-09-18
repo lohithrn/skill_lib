@@ -84,6 +84,35 @@ interactions self-consistent.
   reddening many tests. **Structure-insensitivity is the property mockist tests trade away** —
   and structure is exactly what this skill changes, so default classicist.
 
+### Dependency categories — classify before choosing a double
+
+§1 says *what* the doubles are. This says *which one this dependency gets*, which is the question that
+actually comes up while designing a port. Classify every dependency of a module before deciding how it
+is tested across its seam; the category, not taste, picks the double.
+
+| # | Category | What it is | Test strategy across the seam | Does it need a port? |
+|---|---|---|---|---|
+| 1 | **In-process** | pure computation, in-memory state, no I/O | merge the modules and test through the new interface directly. No double at all | **no** — a port here is pure indirection |
+| 2 | **Local-substitutable** | has a real local stand-in that runs in the suite: SQLite/PGLite for Postgres, an in-memory filesystem, a fake clock, moto/localstack | run the stand-in in the test suite and assert through the interface | **internal seam only** — not at the module's external interface |
+| 3 | **Remote but owned** | your own service across a network: a sibling microservice, an internal API, a queue you publish to | define a **port** at the seam; the logic stays in one deep module, the transport is the adapter. In-memory adapter in tests, HTTP/gRPC/queue adapter in production | **yes** — the archetypal Ports & Adapters case |
+| 4 | **True external** | a third party you do not control: Stripe, Twilio, Cognito, an LLM endpoint | inject it as a port; tests get a mock or a recorded-response adapter. Assert the request you send, not their behaviour | **yes**, always |
+
+Two consequences worth stating, because both are commonly got wrong in the other direction:
+
+- **Category 1 is the most common mistake.** Two pure modules with a Protocol between them is a
+  shallow-module finding, not architecture. The doctrine's promotion threshold and the deletion test
+  (`doctrine.md` §2) both refuse it; the category is a third way to see the same thing.
+- **Category 3 is why "one deep module" and "deployed across a network" are compatible.** A service
+  boundary is a deployment fact, not a design one. The logic can still live in one module with the
+  transport injected — and if it does, the same contract suite runs in-process in milliseconds.
+
+For categories 3 and 4 the port has **two** adapters from day one — production and test — so it never
+trips the one-resolver brake. That is the honest reason a single-resolver port at an I/O boundary is
+listed as *not a finding* throughout this skill: the double **is** the second adapter.
+
+Source: the dependency-category split is from the deepening vocabulary in Pocock,
+`skills/engineering/codebase-design` (`DEEPENING.md`); the doubles it selects are Meszaros' (§1).
+
 ---
 
 ## 2. The layers

@@ -9,6 +9,41 @@ premise: **a signature is documentation, and a string is not part of a signature
 
 ---
 
+## What "interface" means here — wider than the type surface
+
+The three rules below are about the *type* surface, because that is the part a tool can check. But the
+interface a caller actually has to learn is larger, and a review that only reads signatures declares an
+API clean while leaving callers to discover the rest by outage.
+
+**The interface is everything a caller must know to use the module correctly:**
+
+| Part of the interface | Where it belongs | The finding when it is missing |
+|---|---|---|
+| **Type signature** | the signature | `7B` — operations selected by string, `**kwargs`, `Any` |
+| **Invariants** | the type, then the docstring | a constraint enforced nowhere, or by each caller separately — a `Value Object`/`R` naming question |
+| **Ordering constraints** | the docstring, ideally the type | `configure()` must precede `run()` with nothing stopping the reverse — the classic temporal coupling, invisible in every signature |
+| **Error modes** | the signature where the language allows (`Result`, checked exceptions, a union return), else the docstring | a caller cannot know which exceptions to expect, so it catches broadly — `G7` follows from this |
+| **Required configuration** | the constructor, not ambient state | an env var read inside a method: the call site cannot tell the call needs it until it fails at run time. `R`'s constructor-injection rules |
+| **Performance characteristics** | the docstring, and the name | an innocuous-looking property that issues a query per access, or a method that is O(n) inside a loop the caller wrote |
+
+Two consequences for a review:
+
+- **A signature can be perfectly typed and the interface still undocumented.** `7B` passing is not
+  `interface complete`. Where one of the five non-type facts is load-bearing and unstated, report it
+  against the rule that owns it — and if none does, it is a `minor` with CONSEQUENCE **Untestable** or
+  **Silent divergence**, never a style note.
+- **The interface is the test surface.** Callers and tests cross the same seam, so every fact above is
+  something a contract suite can assert: ordering, the error type, the invariant, the query count. If a
+  test has to reach *past* the interface to check one of them, the interface is the wrong shape — that
+  is a structural finding (`G`/`R`), not a test-coverage one.
+
+Ousterhout's point about comments lands here (`md_codegraph/references/laws.md` §Ousterhout vs Martin):
+a docstring stating an ordering constraint or an error mode is not a failure of naming. No name can
+carry "call this before `run()`". Source for the widened definition: the deep-module vocabulary in
+Pocock, `skills/engineering/codebase-design`.
+
+---
+
 ### 7B. Public APIs must be discoverable
 
 Public classes that callers will use programmatically must be inspectable from their signature alone.

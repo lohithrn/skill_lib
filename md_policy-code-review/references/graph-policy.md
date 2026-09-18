@@ -181,10 +181,29 @@ variation, improves testability, protects a boundary, or kills a growing selecti
 `ThingInterface` + `DefaultThing` with one implementation and no I/O boundary **is a finding** —
 speculative structure has the same carrying cost as speculative code.
 
+**The deletion test decides it, and it is what makes this rule reportable rather than a matter of
+taste:**
+
+> Imagine the module deleted and its callers left to fend for themselves. Complexity vanishes ⇒ it was
+> a pass-through, and that is the finding. Complexity reappears at N call sites ⇒ it was earning its
+> keep, and there is nothing to report.
+
+So a `G10` finding must name the call sites complexity would *not* reappear at — that count is the
+SYMPTOM, and it is why `ThingInterface` + one `DefaultThing` is reportable while a one-resolver port at
+a Cognito boundary is not. No named sites ⇒ no finding: you have a suspicion about an abstraction, which
+is exactly the shape of the taste-based review this policy exists to prevent.
+
+Depth is **leverage at the interface** — how much behaviour a caller reaches per unit of interface they
+must learn — not implementation-lines ÷ interface-lines. Never report a ratio: it rewards padding the
+body, and a fat implementation behind a small interface is the *goal*, not the defect.
+
 And the mirror of it: **headroom is not a defect.** An env-scoped name holding one value today, a
 mode knob with one mode, a per-stage resource pointing at one target, a Context field nothing reads
 yet — these are deliberate seams. Record them as `deferred-conflict`, never bill them as debt, never
-simplify them away, and when unsure whether a seam is intentional, **ask**.
+simplify them away, and when unsure whether a seam is intentional, **ask**. A seam the maintainer has
+already confirmed belongs in `.out-of-scope/` (`references/declined.md`), so the next review does not
+ask twice.
 
 Source: Fowler *Speculative Generality*; Ousterhout *A Philosophy of Software Design* ch.4–6
-(shallow modules, pass-through methods).
+(shallow modules, pass-through methods); the deletion test and depth-as-leverage from the deep-module
+vocabulary in Pocock, `skills/engineering/codebase-design`.

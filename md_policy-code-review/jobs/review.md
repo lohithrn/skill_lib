@@ -36,11 +36,17 @@ Target: `$ARGUMENTS` after the mode token, default the repo root.
    - Read the repo's linter config (`ruff.toml`, `.eslintrc*`, `pmd*.xml`, `setup.cfg`,
      `pyproject.toml`) for rules it **already enforces**. An enforced rule changes the finding into a
      note naming the gate (`SKILL.md` §Precedence rule 4).
-5. Write `.policy-review/scope.json`: languages with file counts, entry points, exclusions, groups
-   applying and why, tool table.
-6. Print one line: target, commit, file count, groups, and which measurements are degraded.
+5. **Read `.out-of-scope/`** if it is there — every file, per `references/declined.md` §2 — and record
+   the concept count in `scope.json`. Phase 4 matches every candidate finding against it by concept,
+   not by string. It is never created unprompted, and its absence is not a finding.
+6. Write `.policy-review/scope.json`: languages with file counts, entry points, exclusions, groups
+   applying and why, tool table, declined-concept count.
+7. Print one line: target, commit, file count, groups, and which measurements are degraded. Include
+   `S not run (no diff)` — this mode has no change to compare a spec to, so the spec verdict is
+   `SPEC-UNKNOWN` and saying so is not optional.
 
-A `.policy-review/` from another commit is stale — stop and ask before overwriting it.
+A `.policy-review/` from another commit is stale — stop and ask before overwriting it. `.out-of-scope/`
+is the opposite: durable, committed, and read on every run precisely because this directory is not.
 
 ---
 
@@ -97,8 +103,11 @@ What each group does with its file set:
    merged under the policy whose CONSEQUENCE is worse, with the other named inside `LAW`.
 2. Apply `SKILL.md` §Precedence in order — bans, headroom, stricter cap with the looser one named,
    the repo's enforced gate, `C` over `G`/`H`.
-3. Drop every automatic non-suggestion (`specs/suggestion.md` §3). Move every seam to the
-   **Deferred conflicts** inventory: it is recorded, never billed, never counted in the verdict.
+3. Drop every automatic non-suggestion (`specs/suggestion.md` §3), **including every concept already
+   recorded in `.out-of-scope/`** — matched by concept, not by string, and listed once under
+   `## Declined` with its file. Move every seam to the **Deferred conflicts** inventory: recorded,
+   never billed, never counted in the verdict. Offer once to make a confirmed seam durable in
+   `.out-of-scope/`; write nothing without a yes (`references/declined.md` §4).
 4. Drop any suggestion missing a field. Nine fields, or it does not ship. A deletion suggestion with
    no `EVIDENCE` is dropped or re-worded as `suspicious` per `G9`.
 5. Collapse mass measurements into one finding each with the count and the worst location: illegal

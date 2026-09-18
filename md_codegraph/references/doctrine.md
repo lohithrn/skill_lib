@@ -78,6 +78,37 @@ documented headroom. Never report it as a finding. Never "simplify" it away.
   Ousterhout's **pass-through method** red flag applies: if a resolver only forwards to
   another object, the port is at the wrong altitude.
 
+### The deletion test — how to apply the depth argument in one step
+
+The shallow-module argument above is a property to hold, not a procedure. This makes it checkable,
+**before** the port exists rather than after:
+
+> **Imagine the module deleted and its callers left to fend for themselves. If the complexity
+> vanishes, it was a pass-through. If the complexity reappears at N call sites, it was earning its
+> keep — and N is the leverage.**
+
+Run it on every promoted conflict. It answers a question the five threshold criteria do not: they say
+whether a conflict is *real*, the deletion test says whether *this port* is where the answer belongs.
+A conflict can clear the threshold and still produce a shallow port at the wrong altitude.
+
+- **Complexity vanishes** ⇒ the port hides nothing. Downgrade to `collapse` or `defer`. This is the
+  same verdict as an empty `Deletes` line in the restructure spec, reached one step earlier and much
+  more cheaply — before the resolvers are written.
+- **Complexity reappears once** ⇒ the module is a rename. Useful for naming, not for structure; do not
+  bill it as a port.
+- **Complexity reappears at ≥2 sites, or crosses an I/O boundary** ⇒ real depth. `N` is the argument
+  for the port, and it belongs in the CONSEQUENCE: "deleting this moves the retry policy into 6
+  handlers."
+
+**Depth is leverage at the interface, not a line-count ratio.** Measuring depth as
+implementation-lines ÷ interface-lines rewards padding the body, which is how a deep module becomes an
+unreadable one; measure it as *how much behaviour a caller can reach per unit of interface they must
+learn*. The deletion test measures exactly that, and needs no lines counted.
+
+Its honest limit: it is a thought experiment, and a confident answer to "would complexity reappear?"
+is easy to fake. Name the call sites. An unnamed `N` is an estimate, and this skill does not report
+estimates as measurements.
+
 ---
 
 ## 3. Name the port as a question

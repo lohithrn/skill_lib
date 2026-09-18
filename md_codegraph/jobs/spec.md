@@ -81,6 +81,58 @@ source; every `[deleted]` needs the finding ID that justifies it.
 
 ---
 
+## Phase 2c′ — design it twice (opt-in, one cluster per run)
+
+The default in 2c is one architect per cluster, returning one design. That is right for most clusters
+and wrong for the expensive ones: **your first interface is unlikely to be the best one**, and a single
+architect has no way to know it settled early. Ousterhout's *design it twice* is the fix, and the cost
+is agents, so it is gated.
+
+Run it for **at most one cluster per spec**, and only when one of these holds:
+
+1. the user asked to explore alternatives, or named a module they are unhappy with;
+2. the cluster's ports sit on a **hub** — top-decile fan-in in `graph.json`, so the interface is load-
+   bearing for many callers and cheap to get wrong;
+3. the cluster's slices would touch **>15 files**, so a re-cut after the fact is a second migration;
+4. phase 2e stalled — two passes with no score improvement on this cluster's subsections.
+
+None of those ⇒ skip this phase and say nothing. An unrequested three-way design exploration on a
+two-resolver port is exactly the interface-farm instinct the promotion threshold exists to restrain.
+
+### The procedure
+
+1. **Frame the problem space to the user first, in ≤15 lines**, then fan out *immediately* in the same
+   turn. The user reads while the agents work, so the framing costs no wall-clock. It states: the
+   constraints any interface here must satisfy, the dependency category of each dependency
+   (`../references/di-patterns.md`, and the 4-way category table in
+   `../references/testing-hierarchy.md` §Dependency categories), and one illustrative code sketch —
+   **a sketch to make the constraints concrete, explicitly not a proposal.**
+2. **Launch 3 `codegraph-architect` agents in one message**, all on the same cluster, each with a
+   different `Design constraint` (the field is in `agents/codegraph-architect.md` §Inputs):
+   - `minimize` — 1–3 entry points, maximum leverage per entry point;
+   - `flexibility` — support the cases the report names *and* the ones §6 defers;
+   - `common-caller` — make the single most frequent call site trivial, per `graph.json` fan-in.
+   Add a 4th, `ports-and-adapters`, only when a dependency falls in category 3 or 4 (remote-but-owned,
+   or true external).
+   Each gets the same findings, the same graph nodes, and the same reference files. **The brief is
+   technical and independent of the user-facing framing in step 1** — an agent handed the framing will
+   design toward the prose instead of the code.
+3. **Present them in sequence, then compare in prose** on exactly three axes: **depth** (leverage at the
+   interface), **locality** (where change concentrates when the domain moves), and **seam placement**.
+   Not a feature matrix — the axes are the comparison.
+4. **Recommend one, and be opinionated.** Name the strongest design and why; propose a hybrid where two
+   designs combine cleanly. A menu is not an answer, and handing the user three options with no reading
+   moves the design decision onto them while calling it a spec.
+5. The winning subsections go into §3 like any other architect output, and **§7 records that the other
+   designs existed and why they lost**. That is the cheapest possible record for the next reader who
+   asks "why is the interface shaped like this?" — and it is the only lasting product of the other two
+   agents.
+
+Every design still obeys the promotion threshold. Three architects producing three ports where the
+threshold allows one means the constraint prompts overrode the doctrine: discard all three and defer.
+
+---
+
 ## Phase 2d — order the slices
 
 Run the 7-step ordering algorithm in `../specs/restructure-spec.md` §4 verbatim. Then verify

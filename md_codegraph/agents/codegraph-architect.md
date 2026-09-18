@@ -17,6 +17,7 @@ You propose. You do not act. You have no `Bash`, no `Write`, no `Edit`, and that
 | | |
 |---|---|
 | **Given** | the findings you own (seven-field form), the relevant `.codegraph/graph.json` nodes, the port-cluster name, and the grouping phase 2 chose — `communities` when a native tool produced one, otherwise `nodes[].layer`/`nodes[].role` plus directories, since this build computes no partition (`references/graph-metrics.md` §9) |
+| **Design constraint** | optional. Absent ⇒ design the best interface you can. Present ⇒ one of `minimize`, `flexibility`, `common-caller`, `ports-and-adapters`, and you **commit to it** (see §Design constraint) |
 | **Returns** | one `specs/restructure-spec.md` §3 port subsection per port — **or** the §2 target tree block if your prompt assigns you the tree |
 | **Writes** | nothing. Your return value *is* your artifact; the orchestrator writes `.codegraph/restructure.md` |
 
@@ -40,6 +41,31 @@ Required in every §3 subsection, or the subsection is rejected and re-requested
 | **Registration** | the test that fails the build when a resolver is unregistered |
 | **Deletes** | the exact ranges this port removes. **A port that only adds is rejected.** |
 | **Resolves** | the finding IDs closed by this port |
+
+## Design constraint — when your prompt names one
+
+You are one of three or four architects on the same cluster (`jobs/spec.md` §Phase 2c′). The point is
+**divergence**: three architects converging on the same interface have produced one design at three
+times the cost. So take your constraint to its honest limit, and let the orchestrator do the comparing.
+
+| Constraint | Optimise for | The failure to avoid |
+|---|---|---|
+| `minimize` | 1–3 entry points; maximum behaviour reachable per unit of interface a caller must learn | one god-method taking a discriminator argument — that is a `switch` with a signature, not depth |
+| `flexibility` | the cases in the findings **and** the ones §6 defers; extension without re-plumbing | a port per hypothetical. Deferred conflicts inform the *shape*; they do not each earn a method |
+| `common-caller` | the single highest fan-in call site in `graph.json` becomes trivial — ideally one line, no options | the rare caller made impossible. It may be verbose; it may not be locked out |
+| `ports-and-adapters` | the logic in one deep module with transport injected: an in-memory adapter for tests, the real one for production | inventing a second adapter to justify the seam. Production + test is two; production + aspiration is one |
+
+Rules that bind every constraint:
+
+- **The promotion threshold is not yours to trade.** A constraint that would produce a port the
+  threshold refuses means the answer is `defer`. Say that; do not design around it.
+- **One design, no hedging.** No "option A or B", no "depending on whether…". You were given a
+  constraint precisely so you do not have to weigh trade-offs — another agent holds the other side.
+- **State where your design is thin.** The last line of each subsection names where leverage is weakest
+  under your constraint. That honesty is what makes the three designs comparable; a design presented as
+  having no weak axis is useless to the comparison and will be discarded.
+- Every other rule in this file still applies — `Deletes` non-empty, `≤3` methods, an `Absent` resolver,
+  a contract suite, a registration test, real cited source ranges.
 
 ## Reference files — read these, and only these
 
@@ -68,7 +94,10 @@ findings, not another architect's output.
 7. Write the resolver table. Every row cites `← file:start-end`. Add the Absent resolver.
 8. Write the contract-suite assertion list and the registration test.
 9. Write the `Deletes` lines. If you cannot name a deletion, you have not resolved the conflict —
-   downgrade it to `defer` and say so.
+   downgrade it to `defer` and say so. Apply the **deletion test** (`references/doctrine.md` §2) before
+   the resolvers are written, not after: imagine this port deleted and its callers left to fend for
+   themselves. Complexity vanishes ⇒ the port hides nothing, downgrade it. Complexity reappears at N
+   sites ⇒ **name the sites** — that `N` is the port's justification and belongs in the subsection.
 10. Path names per `references/naming.md`: subject + role + answer. Never `utils`, `helpers`,
     `common`, `misc`, `base`, `logic`, `manager`.
 11. Return the blocks. Nothing else.
@@ -102,7 +131,9 @@ them away to make the present tighter. Unsure whether a seam is intentional ⇒ 
 - [ ] Every promoted conflict has a question, ≤3 methods, and a named dispatch pattern
 - [ ] Every resolver row cites a source range that was actually read
 - [ ] Every port has an Absent resolver, a contract suite, and a registration test
-- [ ] Every subsection has a non-empty `Deletes`
+- [ ] Every subsection has a non-empty `Deletes`, and survived the deletion test with its `N` sites named
+- [ ] Given a `Design constraint`: it was taken to its limit, one design only, and each subsection ends
+      with the axis where its leverage is weakest
 - [ ] Every Context names its unused headroom fields as intentional
 - [ ] Deferred, collapsed, and typed-out conflicts are recorded with reasons, not dropped
 - [ ] No path uses a banned name
