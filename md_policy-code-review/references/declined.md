@@ -133,8 +133,28 @@ busy", "the reviewer was wrong", and anything naming a person rather than a reas
 asked.** The gate in `SKILL.md` §The gate stands: `.policy-review/` is the only path those modes write
 unprompted. A declined decision is the maintainer's to record, so:
 
+### The gate on offering at all
+
+**Not every declined finding earns a file.** A directory of forty entries is read by nobody, and then
+the suppression in §2 is silently matching against prose no one maintains. Offer only when all three
+hold:
+
+1. **The review will reach it again.** A policy rule genuinely points at this code, so the finding
+   regenerates every run. A one-off judgement on a line that is about to be deleted does not.
+2. **It is surprising without the reason.** A future reader looking at the code would ask "why is it
+   like this?" If the shape reads as obviously correct on its own, the file is load with no signal.
+3. **A real trade-off was weighed.** There were genuine alternatives and one was chosen for stated
+   reasons. "We don't want that" is a preference, not a trade-off, and §3 §Writing the reason already
+   rejects it.
+
+Any one missing ⇒ do not offer. Say the finding is declined for this run and move on. The three-part
+test is Pocock's gate for when a decision deserves an ADR (`skills/engineering/domain-modeling`,
+`ADR-FORMAT.md`), with his first clause — *hard to reverse* — replaced by test 1: nothing here is hard
+to reverse (§5 is one `rm`), so the cost this file buys down is **re-litigation**, not commitment.
+
 1. The maintainer declines a finding, or confirms a `deferred-conflict` is intentional.
-2. Offer, in one line: "record this in `.out-of-scope/speculative-ports.md` so future reviews skip it?"
+2. Check the three-part gate above. Fails it ⇒ stop here.
+3. Offer, in one line: "record this in `.out-of-scope/speculative-ports.md` so future reviews skip it?"
 3. On a yes, check for an existing file covering the concept.
    - **Exists** ⇒ append to `Prior findings`. Do not rewrite the reason; the original decision stands
      and its wording is the record.

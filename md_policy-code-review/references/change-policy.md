@@ -104,6 +104,14 @@ fights a pattern the tree follows everywhere is a question for the author, not a
   suite to make an implementation pass** — that inverts the oracle. This is a `blocker` when the
   edited assertion is the only thing that covered the changed line.
 - A bug fixed with no regression test for the exact input that failed.
+- **A test that cannot fail.** Two shapes, both of which read as coverage: the expected value is
+  recomputed the way the code computes it (`assert total(items) == sum(i.price for i in items)`), so
+  the assertion passes by construction; or the check reaches past the interface it just called
+  (`create_user()` then a raw `SELECT`), so it pins the storage shape instead of the behaviour. Quote
+  both sides and name the independent expected value — a literal, a worked example, the spec.
+  `blocker` when it is the only test covering the changed line, because the diff arrived with the
+  appearance of a test and none of the protection. Detail: `md_codegraph/references/testing-hierarchy.md`
+  §9.
 - A changed route, env var, deploy step or public signature not reflected in the README or the
   configuration file that documents it.
 - A new plan-time or apply-time assumption with no assertion at plan time (`H2`).

@@ -75,7 +75,7 @@ adding this repo with `/plugin marketplace add`, stop; run `install.sh` instead.
 
 ## Skills
 
-**12** skills, grouped by what they are for. Invoke any row by its name.
+**13** skills, grouped by what they are for. Invoke any row by its name.
 
 **The standing doctrine is not a skill.** The **three** contracts that outrank every project
 convention — judge code against the **system being built**, not the value in today's snapshot; never
@@ -99,6 +99,12 @@ them from.
 | --- | --- |
 | `md_codegraph` | Reads a codebase as a dependency graph, then restructures it so every conflict becomes an interface, every interface has replaceable implementations wired at a single composition root, and the folder tree is the graph. Explicit invocation only. Bundles **5** subagents. |
 | `md_policy-code-review` | Reviews a tree or a diff against the whole standing policy at once — the **40**-rule architecture, dependency-injection and maintainability standard (group `R`), graph structure (`G`), house conventions (`H`), and ordinary change review (`C`) — with a deterministic linter under `scripts/` whose JSON findings are treated as measured ground truth rather than re-eyeballed. `review` and `diff` emit **suggestions only**; the one `refactor` mode applies them, and its gate is inspect-then-plan-then-edit. Holds the standing doctrine as `references/standing-doctrine.md` and cites it as precedence rules 1 and 2. |
+
+### Diagnose — find the cause before touching the code
+
+| Skill | What it does |
+| --- | --- |
+| `md_bug-diagnosis` | Diagnoses a hard bug or a performance regression, and enforces one gate above all others: **no red-capable command that has already run means no hypothesis.** Phase 1 is the whole skill — a ladder of **10** ways to build a signal that goes red on this exact symptom, then tighten it to seconds and determinism. After that: minimise until every remaining element is load-bearing, rank **3–5** falsifiable hypotheses *before* testing any, one variable per probe behind a taggable `[DEBUG-...]` prefix, and a regression test only at a seam that can actually see the bug — where **no such seam is itself the finding**. Measures a baseline before fixing anything about speed. Redacts every secret out of everything it shows, and never points a loop at production. |
 
 ### Build and provision
 
@@ -126,14 +132,15 @@ them from.
 
 ## Layout
 
-The repo root holds **12** skill directories, the installer, this file, the license and the tests —
-nothing else:
+The repo root holds **13** skill directories, the installer, this file, `AUTHORING.md`, the license and
+the tests — nothing else:
 
 ```
 skill_lib/
   md_<name>/       # one skill; the directory name IS the skill name and the slash command
   install.sh       # the only install path — links or copies each md_*/ into ~/.claude
   README.md
+  AUTHORING.md     # how to write the prose inside a skill, and why the caps exist
   LICENSE
   tests/smoke.sh   # the test suite
 ```
@@ -156,6 +163,10 @@ md_<name>/
 
 `SKILL.md` is capped at **250** lines; every other `.md` file is capped at **600**. Both caps are
 enforced by the test suite.
+
+This section is the layout. **`AUTHORING.md` is how to write the prose inside it** — the router
+pattern the caps follow from, progressive disclosure and the branching test, context pointers, leading
+words, when a prohibition is a guardrail and when it should be a positive, and what to prune.
 
 Bundled agents live in exactly two skills: `md_codegraph/agents/` (**5** agents — cartographer,
 inspector, architect, adversary, surgeon) and `md_director/agents/` (**1** agent).

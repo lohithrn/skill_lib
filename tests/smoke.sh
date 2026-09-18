@@ -694,7 +694,7 @@ print("\n".join(sorted(bad)))
 }
 
 check_file_length_caps() {
-  # SPEC.md §10 states two caps: SKILL.md <=250 because it is the router and is always in context,
+  # AUTHORING.md §9 states two caps: SKILL.md <=250 because it is the router and is always in context,
   # and every other shipped prose file <=600 because a reference is loaded whole. Asserted in a
   # checklist, both drifted; here they cost nothing to keep true.
   local bad=0 f n

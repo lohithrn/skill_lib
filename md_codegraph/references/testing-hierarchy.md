@@ -333,3 +333,32 @@ test failing, you need to write a lower-level test." (2) "Push your tests as far
 pyramid as you can." (3) Keep a higher test only for the increment of confidence it adds —
 "beware of the sunk cost fallacy and hit the delete key." (4) Reproduce every bug in a
 lower-layer test *before* fixing it.
+
+---
+
+## 9. Three ways a test is worthless while green
+
+Every layer above assumes the test can *fail*. These three cannot, or cannot for the reason you
+think, and none of them shows up as a coverage gap. Source: Pocock, `skills/engineering/tdd`.
+
+- **Tautological** — the expected value is recomputed the way the code computes it, so the test
+  passes by construction and can never disagree with the implementation:
+  `expect(total(items)).toBe(items.reduce((s, i) => s + i.price, 0))`, a snapshot derived by hand
+  using the same formula, a constant asserted equal to itself. **The expected value must come from
+  an independent source of truth** — a known-good literal (`.toBe(15)`), a worked example, the spec,
+  or the legacy system's recorded output. This is the one failure mode mutation testing (§7) will
+  not catch, because the mutant changes both sides of the comparison at once.
+- **Verified through a side channel** — the act goes through the interface and the check reaches
+  past it: `createUser()` then `SELECT * FROM users`. It asserts the current storage shape, not the
+  behaviour, so it breaks on every refactor and stays green through a broken read path. Assert
+  through the same seam a caller would use: `createUser()` then `getUser(id)`.
+- **Written in bulk before the implementation** — writing every test first, then every
+  implementation, verifies *imagined* behaviour. You commit to a test structure before the design
+  taught you anything, and the tests end up asserting shape instead of outcome. Work in vertical
+  slices: one test, one minimal implementation, repeat, each test a tracer bullet that answers to
+  what the last one taught.
+
+**Agree the seams before writing any test.** You cannot test everything, so write down the seams
+under test and confirm them, then spend the budget there. A test at an unagreed seam is how effort
+lands on every edge case and misses the critical path — and at layer 2 it is worse than that, since a
+contract suite pinned to the wrong seam locks in an interface nobody chose.
