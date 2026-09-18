@@ -1,0 +1,22 @@
+{
+  "name": "mcp-surface",
+  "displayName": "MCP Surface",
+  "description": "Expose an existing REST/OpenAPI service as an MCP surface: tools generated one-per-operation, skills as prompts, skill documents as read-only resources. Keeps the layering strict — the MCP server holds no AI model, and a skill is never registered as a tool.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lohith"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "openapi",
+    "rest",
+    "tools",
+    "prompts",
+    "resources",
+    "skills",
+    "api-gateway",
+    "code-generation",
+    "protocol"
+  ]
+}
