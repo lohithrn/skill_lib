@@ -214,23 +214,20 @@ Heavy reading runs in subagents so bulk output never enters the conversation.
 
 ## Artifacts
 
-Everything lands in `.policy-review/` in the analysed repo, and nothing else is written by
-`review`/`diff`:
+Two directories, opposite kinds, and the full table plus the end-of-run procedure is
+`references/artifacts.md` — **read it before writing the first file, and again before finishing.**
 
-| File | Contents |
-|---|---|
-| `.policy-review/scope.json` | languages, entry points, exclusions, which groups apply and why |
-| `.policy-review/oracle.json` | the exact command behind every number, and whether it ran |
-| `.policy-review/<group>.json` | one per group run: `R`, `G`, `H`, `C`, `S` |
-| `.policy-review/spec.json` | the spec source, how it was found, and whether it was readable |
-| `.policy-review/report.md` | the full report, section order per `specs/suggestion.md` §4 |
-
-A `.policy-review/` from a different commit is stale and poisons the report: stop and ask.
-
-**`.out-of-scope/` is the opposite kind of artifact** — read every run, written only on an explicit yes,
-and **committed to the repo**. It is durable precisely because `.policy-review/` is not: a
-`deferred-conflict` recorded only there dies with the directory, so the same seam is re-reported forever.
-`references/declined.md`.
+- `.policy-review/` is **scratch**: `scope.json`, `oracle.json`, `<group>.json`, `spec.json`,
+  `report.md`, all measured against one sha. `review`/`diff` write nothing else, anywhere. One from a
+  different commit is stale and poisons the report: stop and ask.
+- **Ending a run means disposing of it.** Promote every `deferred-conflict` into `.out-of-scope/`,
+  commit `report.md` into `documentation/` if it still teaches something, then **delete
+  `.policy-review/` and say so**. `.gitignore` is not a third exit: ignoring keeps the directory and
+  hides it from `git status`, which is how a stale one survives to poison the next review.
+- **`.out-of-scope/` is the opposite kind** — read every run, written only on an explicit yes,
+  **committed**, and never tidied away. It is durable precisely because `.policy-review/` is not: a
+  `deferred-conflict` recorded only there dies with the directory, so the same seam is re-reported
+  forever. `references/declined.md`.
 
 ---
 
@@ -246,5 +243,7 @@ and **committed to the repo**. It is durable precisely because `.policy-review/`
 - [ ] `.out-of-scope/` was read, matched by concept, suppressions listed; nothing written without a yes
 - [ ] Headroom is recorded as `deferred-conflict`, not reported as debt
 - [ ] In `review`/`diff`: nothing outside `.policy-review/` was written, and the report says so
+- [ ] `.policy-review/` was disposed of per `references/artifacts.md` — headroom promoted first, then
+      deleted or committed, never left behind and never `.gitignore`d
 - [ ] In `refactor`: the three-bucket plan came first, and the do-not bucket is populated by name
 - [ ] The conversation got a ≤25-line summary, one next action, and what it does not cover

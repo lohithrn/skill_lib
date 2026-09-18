@@ -107,6 +107,30 @@ Default it in `project_constants.sh` (`MOUNT_STRATEGY="${MOUNT_STRATEGY:-s3-moun
 stage override it. Both values are real and in use; do not delete the branch you are not using
 today.
 
+## The version number is a promise about the API
+
+`major.minor.patch` in `setup.py`, and the rule belongs to the consumer, not the author: **a change
+that breaks an import somebody has already written is a major bump, however small the diff.**
+
+| Change | Bump |
+|---|---|
+| A symbol moves between modules | **major** — the old import path is gone |
+| An `__init__.py` export list narrows | **major** — a re-export a consumer used has gone |
+| A required argument is added, or a default changes meaning | **major** |
+| A new module, function, or optional argument | minor |
+| A fix behind an unchanged signature | patch |
+
+- **A major bump and a migration map ship together.** The map exists *because* the major bump
+  happened; publishing the bump without it ships a break with no instructions, and publishing the map
+  without the bump tells consumers to change code that still works. `jobs/write-the-map.md`.
+- **Never re-publish a version that already exists on the index or in the bucket.** A consumer who
+  pinned it gets different code under the same number, and no lockfile catches that — it is the same
+  failure as a stale baked manifest below, arriving through the version string instead.
+- Beta publishes carry a pre-release suffix (`1.4.0b3`), never a reused release number. A beta that
+  shares a number with a release makes "which code is in the mount?" unanswerable.
+- The commit that bumps the version says so: `chore(release): 2.0.0`, with the breaking changes in the
+  body. That commit is what a consumer bisects to when an import disappears.
+
 ## Verifying a deploy
 
 Run all three. The first two are pure reads and cost nothing:

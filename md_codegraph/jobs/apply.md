@@ -47,9 +47,31 @@ Each numbered step in the slice's `Steps` list is **one commit**. Per step:
    is an option value, never a positional — a positional argument exits 2 and step 4 would read
    that as red), then
    `scripts/graph.sh --cycles` if the step claims a graph change.
-4. Green ⇒ commit with the slice ID and step number in the subject. Red ⇒ **revert the step**
+4. Green ⇒ commit, per §Commit subject below. Red ⇒ **revert the step**
    (`git checkout -- .` for an uncommitted step), report the failure, and stop the slice.
 5. Update the TodoWrite item. One step in progress at a time.
+
+## Commit subject
+
+The spec is scratch and gets deleted (`../references/artifacts.md`), so **the commit body is the only
+surviving record of which planned slice this was**. Thirty commits reading `slice 3 step 2` are a
+history nobody can bisect, revert selectively, or review.
+
+```
+refactor(invoice): replace the tier if/elif with a resolver registry
+
+Deletes the else at invoice_service.py:137 and the duplicate switch at
+reporting/summary.py:31. Slice 3, step 2 of the approved restructure spec.
+```
+
+- `type(scope): imperative summary` — `refactor` for a structural move, `test` for the
+  characterization and contract suites, `feat` only when the slice deliberately adds behaviour.
+- **A step that preserves behaviour is `refactor`, and one that does not is not a step** — it is a
+  spec bug, per §Refusals. Mislabelling it is what makes a later `git bisect` lie about where a
+  regression entered.
+- The body carries the `Deletes:` line from the spec's port subsection. A step whose body has nothing
+  to put there moved code without removing a conflict, which is the finding the spec was supposed
+  to close.
 
 **The order inside a slice is not negotiable.** Port first, resolvers second, contract suite and
 registration test third — and both must **fail** before the registry exists, or they are not
@@ -124,6 +146,9 @@ red oracle and report.
    explicitly carried forward, the fitness suite green.
 3. Mutation score on the new resolvers if a mutation tool is in `oracle.json`. A resolver whose
    contract suite kills no mutants has a contract suite that asserts nothing.
+4. **End the run:** `../references/artifacts.md` §Ending a run. Promote every deferred conflict out of
+   `.codegraph/` and commit it, ask about `report.md` and `verify.md`, then delete the directory and
+   say so. The spec has been applied and verified — it is now spent, and the history proves its claims.
 
 ---
 

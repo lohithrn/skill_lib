@@ -109,3 +109,24 @@ Document behavior changes, test coverage, and provider/integration risks in PR s
 
 **Consequence without it:** a behaviour change hidden inside a formatting commit cannot be reviewed and
 cannot be reverted on its own — which is the whole point of rule 25 in `jobs/refactor-workflow.md`.
+
+### The subject line carries the type, and the type is a claim
+
+Every commit `refactor` mode makes is `type(scope): imperative summary` — `feat` · `fix` · `refactor` ·
+`test` · `docs` · `chore` · `perf` — with a body saying what the step *removed*:
+
+```
+refactor(billing): move tier selection behind a TierPolicy handler
+
+Removes the if/elif at billing/invoice.py:88. Step 7 of the refactor plan;
+behaviour pinned by tests/test_invoice.py, unchanged.
+```
+
+- **`refactor` is a promise that behaviour did not change**, and rule 24 is what makes it true. A
+  behaviour change committed as `refactor` makes a later `git bisect` point at the wrong commit — the
+  failure mode is not a style complaint, it is a wrong answer during an incident.
+- One step of rule 25's order per commit. The step number in the body is what lets a reviewer read the
+  sequence back without the plan document, which is scratch and will not survive
+  (`references/artifacts.md`).
+- Never amend or squash a step that is already pushed; a reviewer reading half a sequence sees a
+  restructure that looks unmotivated.

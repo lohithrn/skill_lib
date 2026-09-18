@@ -5,9 +5,12 @@
 # Local MCP tool state
 .serena/
 
-# Python bytecode from the measurement scripts
+# Python bytecode and test caches from running the measurement scripts and the assets' own tests.
+# These are tool output, not artifacts a skill writes into somebody's repo — the rule in
+# docs/authoring.md §10 is about the latter, and it has no .gitignore exit.
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # macOS
 .DS_Store

@@ -22,6 +22,14 @@ network by definition. Those programs live under `md_<name>/assets/`, never unde
 offline guarantee above stays a guarantee: the tests draw the line at the directory, and a reviewer
 can tell which half of a skill can reach the internet by the path alone.
 
+**A run leaves nothing behind that nobody chose to keep.** Every path a skill writes into your repo is
+either scratch — deleted by the run that made it — or durable, which means **committed**, in one
+documentation folder, with a semantic commit subject. `.gitignore` is not a third exit: ignoring a
+scratch directory keeps it *and* hides it from `git status`, which is how a stale artifact survives to
+poison the next run. The contract is `docs/authoring.md` §10–11, each skill's own disposition table is
+`md_<name>/references/artifacts.md`, and `tests/smoke.sh` fails the build if a path a job writes is
+missing from that table.
+
 ## Install
 
 ```bash
@@ -132,18 +140,23 @@ them from.
 
 ## Layout
 
-The repo root holds **13** skill directories, the installer, this file, `AUTHORING.md`, the license and
-the tests — nothing else:
+The repo root holds **13** skill directories, the installer, this file, one `docs/` folder, the license
+and the tests — nothing else:
 
 ```
 skill_lib/
   md_<name>/       # one skill; the directory name IS the skill name and the slash command
   install.sh       # the only install path — links or copies each md_*/ into ~/.claude
-  README.md
-  AUTHORING.md     # how to write the prose inside a skill, and why the caps exist
+  README.md        # the index: what each skill is, and where files go
+  docs/            # every document about the repo, and the only such folder
+    authoring.md   #   how to write the prose inside a skill, and why the caps exist
+    codegraph-spec.md  # md_codegraph's design record — rationale, not runtime rule text
   LICENSE
   tests/smoke.sh   # the test suite
 ```
+
+**`docs/` is deliberately not installed.** `install.sh` copies `md_*/` only, so a design record cannot
+leak into a model's context at run time; what a skill needs while running lives inside that skill.
 
 Each skill directory is self-contained. `SKILL.md` is the only required file; every subdirectory is
 optional and only present where a skill needs it:
@@ -164,9 +177,10 @@ md_<name>/
 `SKILL.md` is capped at **250** lines; every other `.md` file is capped at **600**. Both caps are
 enforced by the test suite.
 
-This section is the layout. **`AUTHORING.md` is how to write the prose inside it** — the router
+This section is the layout. **`docs/authoring.md` is how to write the prose inside it** — the router
 pattern the caps follow from, progressive disclosure and the branching test, context pointers, leading
-words, when a prohibition is a guardrail and when it should be a positive, and what to prune.
+words, when a prohibition is a guardrail and when it should be a positive, what to prune, what a run is
+allowed to leave behind (§10), and the commit-subject and version contracts (§11).
 
 Bundled agents live in exactly two skills: `md_codegraph/agents/` (**5** agents — cartographer,
 inspector, architect, adversary, surgeon) and `md_director/agents/` (**1** agent).

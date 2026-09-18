@@ -202,6 +202,71 @@ check_no_banned_auth_material() {
   fi
 }
 
+check_write_paths_declare_a_disposition() {
+  # docs/authoring.md §10: scratch has two exits, deleted or committed, and .gitignore is not a
+  # third. A skill that writes its OWN dot-directory into somebody else's repo is the case that
+  # rots — the directory is invisible in a diff, survives the run, and the next run reads it as if
+  # it were fresh. So: every such skill ships references/artifacts.md, that file names the
+  # directory, and it states BOTH exits. Existence alone is not the check; a disposition table
+  # that only says "delete" loses the report the user wanted to keep, and one that only says
+  # "commit" is how the litter becomes permanent.
+  local bad=0 s dots d
+  for s in $(cd "$ROOT" && ls ./md_*/SKILL.md 2>/dev/null); do
+    local dir; dir=$(dirname -- "$ROOT/$s")
+    # Dot-directories the skill writes INTO, identified by a named file inside one: `.codegraph/
+    # report.md`, `.policy-review/scope.json`. A bare `.terraform/` or `.venv/` in an exclusion
+    # list is a directory the skill reads past, never writes, and naming a file is what separates
+    # the two without a hand-maintained allowlist. The durable ledgers are committed by design and
+    # are excluded by name, with their contract stated where they are written.
+    local paths
+    paths=$(grep -ohE '`\.[a-z][a-z0-9-]+/[A-Za-z0-9_<>.-]+\.(md|json|jsonl|csv|ya?ml|txt)`' \
+          "$dir"/SKILL.md "$dir"/jobs/*.md 2>/dev/null | tr -d '`' | sort -u \
+          | grep -vE '^\.(git|github|venv|vscode|idea|env|claude|codex|out-of-scope|terraform)/' || true)
+    [ -n "$paths" ] || continue
+    dots=$(printf '%s\n' "$paths" | sed -E 's|^(\.[a-z0-9-]+/).*|\1|' | sort -u)
+    local contract="$dir/references/artifacts.md"
+    if [ ! -f "$contract" ]; then
+      fail "$s writes $(printf '%s ' $dots)but has no references/artifacts.md"
+      bad=1
+      continue
+    fi
+    # Every individual path, not just its directory: a job that starts writing one more file is
+    # exactly how a disposition table goes stale, and a stale table is worse than none because it
+    # reads as complete.
+    for d in $paths; do
+      grep -qF -- "$d" "$contract" || { fail "$s: $d is written but absent from references/artifacts.md"; bad=1; }
+    done
+    grep -qiE 'delet' "$contract" || { fail "$contract states no deletion exit"; bad=1; }
+    grep -qiE 'commit' "$contract" || { fail "$contract states no promotion exit"; bad=1; }
+  done
+  [ "$bad" -eq 0 ] && pass "every scratch directory has a disposition with both exits"
+}
+
+check_gitignore_is_not_an_exit() {
+  # The third door: ignoring a scratch directory keeps it AND hides it from `git status`, so a
+  # stale artifact survives to poison the next run and nobody is ever reminded it is there. No
+  # shipped document may tell anyone to ignore a skill's own artifact directory. Mentioning
+  # .gitignore as a thing that EXISTS is fine — graph-tooling.md must be able to explain that
+  # `git ls-files --exclude-standard` honours it — so the finding is the instruction, which means
+  # an ignore verb and a dot-directory on the same line, with no negation on it. The negation
+  # filter is the same concession check_no_banned_auth_material makes: a document that cannot
+  # write "never add .codegraph/ to .gitignore" has to state the ban in euphemism, which is how a
+  # ban stops being followed.
+  local hits
+  # `.{0,60}` and not `[^.]{0,60}`: the thing being ignored is a PATH, so the span between the verb
+  # and `gitignore` is full of dots and a dot-excluding class can never cross it.
+  hits=$(cd "$ROOT" && grep -rniE '(add|put|append|list|place).{0,60}gitignore' \
+        --include='*.md' md_* docs 2>/dev/null \
+        | grep -E '\.(codegraph|policy-review|out-of-scope)/' \
+        | grep -viE "never|do not|don't|is not|not an? (exit|option|door)|instead of|rather than" || true)
+  if [ -z "$hits" ]; then
+    pass "no document offers .gitignore as an exit for its own artifacts"
+  else
+    fail "a document tells the model to ignore an artifact directory instead of disposing of it"
+    printf '%s\n' "$hits" | head -5 | sed 's/^/      /'
+  fi
+}
+
 check_no_secrets() {
   local hits
   hits=$(cd "$ROOT" && grep -rn -iE '(aws_secret_access_key|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|password[[:space:]]*=[[:space:]]*["'"'"'][^"'"'"']+)' \
@@ -694,7 +759,7 @@ print("\n".join(sorted(bad)))
 }
 
 check_file_length_caps() {
-  # AUTHORING.md §9 states two caps: SKILL.md <=250 because it is the router and is always in context,
+  # docs/authoring.md §9 states two caps: SKILL.md <=250 because it is the router and always in context,
   # and every other shipped prose file <=600 because a reference is loaded whole. Asserted in a
   # checklist, both drifted; here they cost nothing to keep true.
   local bad=0 f n
@@ -1242,6 +1307,8 @@ check_scripts_are_stdlib_only
 
 head2 "SECURITY"
 check_no_banned_auth_material
+check_write_paths_declare_a_disposition
+check_gitignore_is_not_an_exit
 check_no_secrets
 check_no_unsafe_shell
 check_shell_syntax

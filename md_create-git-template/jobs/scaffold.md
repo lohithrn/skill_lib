@@ -92,3 +92,14 @@ The report covers, in this order:
 6. an explicit statement that **this run made no AWS IAM changes**.
 
 Point 6 is not a courtesy. It is the sentence that lets a reviewer skip an IAM audit for this change.
+
+**The scaffold commit is the repo's first commit, so it sets both conventions.** Recommend
+`chore(scaffold): add <type> infra and deploy skeleton` — one commit, scaffolding only, no application
+code mixed in — and say that the lib templates seed `version="0.1.0"` **deliberately**: `1.0.0` is a
+claim that the API is stable, and a scaffolder cannot make that claim on the author's behalf. The first
+publish bumps it; a breaking import change after that is a major bump, however small the diff.
+
+The engine leaves nothing behind to clean up: it copies, substitutes, strips the `.tmpl` suffix, and
+skips each template's `TOKENS.md` because that file is meta about the template, not part of the
+scaffolded repo. If a run ever needs a scratch file, it goes in `/tmp` — never in the new repo, whose
+entire tracked content at this point is scaffolding a reviewer is about to read.

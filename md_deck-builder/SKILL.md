@@ -74,7 +74,16 @@ python /mnt/skills/public/pptx/scripts/clean.py unpacked/
 (cd unpacked && rm -f ../out.pptx && zip -Xr ../out.pptx .)
 # validate against the template so inherited template quirks are baselined out
 python /mnt/skills/public/pptx/scripts/office/validate.py out.pptx --original template.pptx
+# then, once the QA gate is green: the unpacked tree is spent
+rm -rf unpacked
 ```
+
+**`unpacked/` is scratch, and the deck is the deliverable.** Unpack somewhere the user is not keeping
+files — a temp directory, or a path you delete — and **delete the tree once `qa_gate.py` is green**. A
+few thousand XML parts left in somebody's project folder is litter that looks like source: the next
+person cannot tell whether editing `unpacked/ppt/slides/slide2.xml` changes the deck (it does not, once
+it has been repacked), and no `.gitignore` entry fixes that, it only hides it. Say in the final message
+that the tree was removed, and name the one file that survived.
 
 ## Index
 

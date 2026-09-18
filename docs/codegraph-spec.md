@@ -187,8 +187,7 @@ flow, and is exempt.
 The skill is built the way it tells you to build. This is the primary correctness check on it.
 
 ```
-md_codegraph/
-├── SPEC.md                     # this file
+md_codegraph/                   # this file is docs/codegraph-spec.md, one level up and NOT installed
 ├── SKILL.md                    # THE CONFLICT: which job? (router, ≤250 lines)
 ├── agents/                     # RESOLVERS of the "who does this work?" conflict
 │   ├── codegraph-cartographer.md #   → builds the graph
@@ -357,8 +356,10 @@ lines with bulk on disk. Same outcome, and fan-out survives. Add `context: fork`
 
 ## 10. Definition of done
 
-- [ ] `claude plugin validate . --strict` clean
+- [ ] `bash tests/smoke.sh` clean — the repo is installed by `install.sh`, not validated as a plugin
 - [ ] `/md_codegraph` never fires without an explicit `/`
+- [ ] every path the run writes appears in `references/artifacts.md` with a disposition, and the run
+      ends by taking it: `docs/authoring.md` §10
 - [ ] `SKILL.md` ≤ 250 lines and contains no job logic
 - [ ] every reference file ≤ 600 lines, cites its sources, imports no other reference
 

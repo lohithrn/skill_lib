@@ -164,6 +164,11 @@ Not covered ruby graph degraded · dynamic dispatch in plugins/ unresolvable
 Next: revert slices 6 and 7, then /md_codegraph verify again   (full: .codegraph/verify.md)
 ```
 
+**A PASS in phase-5 mode ends the run, so dispose of `.codegraph/`** — `../references/artifacts.md`
+§Ending a run. A FAIL does not: the failed claims and `applied.md` are what the revert-and-retry needs,
+so the directory stays and the next action says so. Phase-3 mode never disposes — the spec it just
+verified has not been applied yet.
+
 ---
 
 ## Refusals

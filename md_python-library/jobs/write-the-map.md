@@ -110,7 +110,24 @@ token = generator.generate_participant_token(room="<room>", identity="<id>")
 Six to eight pairs covers a large refactor. Twenty means the map is documenting the library instead of
 the migration.
 
-## 7. Review the map before publishing
+## 7. Where the map lives
+
+**In the library repo, in `documentation/`, committed — never at the repo root and never in a scratch
+directory.** `documentation/migration-<old>-to-<new>.md`, named for the two versions it spans.
+
+The map is **durable**: it records a decision (what moved where, and why) that outlives the run, and a
+consumer will open it months after the refactor. That makes it the opposite of the measurements it was
+built from — the `leftover_imports.sh` output is scratch, spent once the rows are written, and belongs
+in `/tmp` or nowhere.
+
+- **A `MIGRATION.md` dropped beside the `README.md` is the most expensive kind of litter**, because it
+  looks official and nobody dares delete it after the migration is over. One documentation folder, one
+  file per version pair, and the pair in the filename is what tells a reader which maps are historical.
+- It ships with the major bump, in the same commit or the one before it:
+  `docs(migration): map 1.x imports to 2.0`. `references/deploy-and-publish.md` §The version number.
+- **Do not delete a superseded map.** A consumer three versions behind migrates through both.
+
+## 8. Review the map before publishing
 
 - [ ] Every symbol in the measured old surface has exactly one row
 - [ ] No right-hand side is blank, "TBD", or "one of these two"

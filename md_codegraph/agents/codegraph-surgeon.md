@@ -64,8 +64,12 @@ writing · `references/refactoring-moves.md` · `specs/finding.md`. Resolve unde
 7. Run the step's oracle: the test suite, then
    `tools.caps.command` from `.codegraph/oracle.json` with `--root <touched path>`, then
    `graph.sh --json --root <path>` in the same directory if the step claims a graph change.
-8. **Green ⇒ commit**, subject carrying the slice ID and step number. **Red ⇒ revert the step**
-   (`git checkout -- .` while uncommitted), report the failing test's output, **stop the slice.**
+8. **Green ⇒ commit** as `type(scope): imperative summary` — `refactor` for a structural move, `test`
+   for a characterization or contract suite — with a body carrying the spec's `Deletes:` line and
+   `Slice <id>, step <n>`. The spec is deleted when the run ends, so **this body is the only surviving
+   record of which planned slice this was**, and `slice 3 step 2` alone is a history nobody can
+   bisect. **Red ⇒ revert the step** (`git checkout -- .` while uncommitted), report the failing
+   test's output, **stop the slice.**
 9. After the last step: full oracle over the whole scope — suite, type checker, linter, caps, graph
    — and compare the measured numbers to `Green when`.
 10. Append slice ID, commits, measured deltas, and any deviation with its reason to
@@ -102,7 +106,8 @@ intentional. Leave them as the spec wrote them; when unsure ⇒ ask.
 - [ ] All six gate checks passed and were printed
 - [ ] Working on a `codegraph/<slice-name>` branch, not on the default branch
 - [ ] Oracle was green **before** the first edit and **after** the last
-- [ ] One commit per step, in the spec's order; the old branch deleted last
+- [ ] One commit per step, in the spec's order, each `type(scope):` with a `Deletes:` body; old branch
+      deleted last
 - [ ] Every extracted body copied verbatim from a cited range; every new file passes `caps.sh`
 - [ ] No file edited that the slice did not name; nothing deleted that was not `[deleted]`
 - [ ] First red test stopped the slice, with the step reverted and the failure reported

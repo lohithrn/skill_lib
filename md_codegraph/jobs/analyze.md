@@ -171,6 +171,12 @@ the output stops at findings — no communities, no folder proposal, no next-act
 `spec`. Use it for a PR-sized diff. If the target is a diff, scope every dimension to the changed
 files plus their direct importers, and say so in the report.
 
+**`review` ends the run, so it also disposes of `.codegraph/`** — `../references/artifacts.md`
+§Ending a run. Nothing downstream is going to read these measurements: there is no spec to write and
+no slice to apply, so the per-dimension JSON is spent the moment the report is written. Promote the
+deferred conflicts, offer `report.md`, delete the rest. An `analyze` that the user is taking on to
+`spec` keeps the directory — that is the state machine, not litter.
+
 ---
 
 ## Refusals

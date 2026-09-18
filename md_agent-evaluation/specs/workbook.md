@@ -7,6 +7,12 @@ skill is the explanation** — what to measure, why, how to compute it, and how 
 column-and-sheet contract below: rebuild it in any spreadsheet, a CSV, or a table in your tracker, and
 the numbers behave the same. Do not parse or regenerate a binary you cannot diff in review.
 
+**Where it lives, when you build one: `documentation/`, committed, as CSV or TSV.** An eval workbook is
+**durable** — its whole value is comparing today's numbers against the last release's, so a workbook
+that lives in a scratch directory or a download folder makes every run the first run. A diffable text
+format is what lets a reviewer see *which* rows moved rather than being told the composite fell. This
+skill has no `Write` tool and never creates the file itself; it tells you what belongs in it.
+
 ## The six sheets
 
 | Sheet | Purpose |

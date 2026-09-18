@@ -111,7 +111,7 @@ a sealed/ADT set the compiler checks. Both are data. **Nesting is measured from 
 `for` + `if` is depth 1 and legal, a third level is not, and a guard clause removes nesting.
 
 **File length is measured on code files only** — the cap is a claim about how much *code* one file
-may hold, and firing it on a README teaches a reader to ignore the tool. Prose: `SPEC.md` §10.
+may hold, and firing it on a README teaches a reader to ignore the tool. Scope: `references/laws.md` §8.
 
 **A breach may be declared exempt in the source** with `# codegraph:exempt <metrics> -- <reason>`
 above the declaration — or, for `file_lines`, in the first 20 lines of the file, since a file has no
@@ -232,17 +232,17 @@ Dependency set: `python3`, `awk`, `grep`, `git`. Nothing is installed, nothing i
 | `references/refactoring-moves.md` | safe slicing: seams, Branch by Abstraction, Parallel Change, Mikado |
 | `references/language-idioms.md` | ports, registries, Contexts, roots, no-`else` idioms per language |
 | `references/refine-loop.md` | the convergence loop, its stopping criteria, and why it is machine-gated |
+| `references/artifacts.md` | ★ every path a run writes, its disposition, and how the last phase ends the run |
 
-Output contracts in `specs/`: `finding.md` (the Iron Law) · `oracle.md` (what command proves a claim,
-per dimension) · `graph-report.md` (analyze output + the ≤25-line summary) · `restructure-spec.md`
-(the phase-2 gate).
+Output contracts in `specs/`: `finding.md` (the Iron Law) · `oracle.md` (the proving command per
+dimension) · `graph-report.md` (analyze output + the ≤25-line summary) · `restructure-spec.md` (the gate).
 
 ## Checklist before saying done
 
 - [ ] The right job file was read, and only that one
 - [ ] Every number in the output came from a command that ran
 - [ ] Every finding has all seven fields and survived verification
-- [ ] Headroom was recorded as `DEFERRED CONFLICT`, not reported as debt
+- [ ] Headroom was recorded as `DEFERRED CONFLICT`, promoted out of `.codegraph/`, and not called debt
 - [ ] No file was edited before the approval block was checked
 - [ ] Tests were green before and after every applied slice
 - [ ] Every port has an `Absent` resolver, a contract suite and a registration test
