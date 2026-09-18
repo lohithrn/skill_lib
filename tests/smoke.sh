@@ -20,7 +20,10 @@ set -uo pipefail
 IFS=$'\n\t'
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-SKILL_DIRS=$(cd "$ROOT" && ls -d ./*/skills/*/ 2>/dev/null || true)
+# The layout is flat: every skill is a TOP-LEVEL `md_<name>/` directory holding SKILL.md. The
+# `md_` prefix is the discovery contract, not decoration — it is what keeps `tests/` (and any
+# future tooling directory) from being enumerated as a skill by a bare `./*/` glob.
+SKILL_DIRS=$(cd "$ROOT" && ls -d ./md_*/ 2>/dev/null || true)
 PASS=0
 FAIL=0
 FIXTURE=""
@@ -47,7 +50,7 @@ check_no_network_in_skills() {
   # Executable skill content may not reach the network at all.
   local hits
   hits=$(cd "$ROOT" && grep -rn -E '(^|[^A-Za-z_])(curl|wget|nc|netcat)[[:space:]]|https?://|urllib|requests\.(get|post)|http\.client|socket\.|fetch\(|/dev/tcp|pip install|npm install|apt-get|brew install' \
-        ./*/skills/*/scripts/ ./*/agents/ 2>/dev/null | grep -v -E '\.md:[0-9]+:.*(cite|source|see |RFC)' || true)
+        ./md_*/scripts/ ./md_*/agents/ 2>/dev/null | grep -v -E '\.md:[0-9]+:.*(cite|source|see |RFC)' || true)
   if [ -z "$hits" ]; then
     pass "no network calls in scripts/ or agents/"
   else
@@ -66,11 +69,11 @@ check_documented_commands_are_offline() {
   # instead, which is the only form safe to put in front of a model on an offline machine.
   # `npx X` is the METAVARIABLE, used by the prose that warns against the unguarded form; flagging
   # it would flag the warning rather than the command. A real package name is never a bare `X`.
-  hits="$hits$(cd "$ROOT" && grep -rn -E 'npx ' ./*/skills/*/references/ ./*/skills/*/*.md 2>/dev/null \
+  hits="$hits$(cd "$ROOT" && grep -rn -E 'npx ' ./md_*/references/ ./md_*/*.md 2>/dev/null \
         | grep -v -- '--no-install' | grep -v -E 'npx X([^A-Za-z0-9_-]|$)' || true)"
   # -mod=mod is the mode that lets the go command rewrite go.mod and FETCH the missing modules.
   # The prose may name it as the wrong answer; only the assignment form is a command.
-  hits="$hits$(cd "$ROOT" && grep -rn -E 'GOFLAGS=-mod=mod' ./*/skills/*/references/ ./*/skills/*/*.md 2>/dev/null || true)"
+  hits="$hits$(cd "$ROOT" && grep -rn -E 'GOFLAGS=-mod=mod' ./md_*/references/ ./md_*/*.md 2>/dev/null || true)"
   if [ -z "$hits" ]; then
     pass "every package-runner command in the docs carries its offline guard"
   else
@@ -147,7 +150,7 @@ for root in sys.argv[1:]:
 for b in bad:
     print(b)
 PY
-  out=$(cd "$ROOT" && python3 "$prog" ./*/ )
+  out=$(cd "$ROOT" && python3 "$prog" ./md_*/ )
   rm -f -- "$prog"
   if [ -z "$out" ]; then
     pass "every copyable command carries its own offline guard"
@@ -159,7 +162,7 @@ PY
 
 check_no_webfetch_tools() {
   local hits
-  hits=$(cd "$ROOT" && grep -rn -E 'tools:.*(WebFetch|WebSearch)' ./*/agents/ 2>/dev/null || true)
+  hits=$(cd "$ROOT" && grep -rn -E 'tools:.*(WebFetch|WebSearch)' ./md_*/agents/ 2>/dev/null || true)
   if [ -z "$hits" ]; then
     pass "no bundled agent is granted WebFetch or WebSearch"
   else
@@ -171,7 +174,7 @@ check_no_webfetch_tools() {
 check_scripts_are_stdlib_only() {
   local hits
   hits=$(cd "$ROOT" && grep -rn -E '^[[:space:]]*(import|from)[[:space:]]+(requests|httpx|urllib3|networkx|numpy|pandas|scipy|yaml|git)\b' \
-        ./*/skills/*/scripts/ 2>/dev/null || true)
+        ./md_*/scripts/ 2>/dev/null || true)
   if [ -z "$hits" ]; then
     pass "measurement scripts import no third-party package"
   else
@@ -214,7 +217,7 @@ check_no_secrets() {
 check_no_unsafe_shell() {
   local hits
   hits=$(cd "$ROOT" && grep -rnE '\beval\b|\bsudo\b|chmod[[:space:]]+777|rm[[:space:]]+-rf[[:space:]]+/[^"'"'"'$]' \
-        ./*/skills/*/scripts/ install.sh 2>/dev/null | grep -vE ':[[:space:]]*#' || true)
+        ./md_*/scripts/ install.sh 2>/dev/null | grep -vE ':[[:space:]]*#' || true)
   if [ -z "$hits" ]; then
     pass "no eval, sudo, chmod 777, or unrooted rm -rf in shipped shell"
   else
@@ -225,7 +228,7 @@ check_no_unsafe_shell() {
 
 check_shell_syntax() {
   local bad=0 f
-  for f in $(cd "$ROOT" && ls install.sh tests/smoke.sh ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for f in $(cd "$ROOT" && ls install.sh tests/smoke.sh ./md_*/scripts/*.sh 2>/dev/null); do
     bash -n "$ROOT/$f" 2>/dev/null || { fail "syntax error in $f"; bad=1; }
   done
   [ "$bad" -eq 0 ] && pass "every shipped shell script parses"
@@ -236,7 +239,7 @@ check_scripts_set_safe_flags() {
   # with findings and reserve non-zero for "the scan could not run". They must still
   # set -u and pipefail so a typo or a broken pipe cannot silently produce empty output.
   local bad=0 f
-  for f in $(cd "$ROOT" && ls ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for f in $(cd "$ROOT" && ls ./md_*/scripts/*.sh 2>/dev/null); do
     grep -qE '^set -[a-z]*u' "$ROOT/$f"  || { fail "$f does not set -u"; bad=1; }
     grep -q 'pipefail' "$ROOT/$f"        || { fail "$f does not set pipefail"; bad=1; }
   done
@@ -294,7 +297,7 @@ check_installer_installs_the_bundled_agents() {
   # never load — the pipeline still answers, with none of the guard rails it claims.
   local sandbox want got
   sandbox=$(mktemp -d)
-  want=$(cd "$ROOT" && ls ./*/agents/*.md 2>/dev/null | wc -l | tr -d ' ')
+  want=$(cd "$ROOT" && ls ./md_*/agents/*.md 2>/dev/null | wc -l | tr -d ' ')
   [ "$want" -gt 0 ] || { info "no bundled agents to install"; rm -rf -- "$sandbox"; return; }
   CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
     bash "$ROOT/install.sh" >/dev/null 2>&1
@@ -424,6 +427,13 @@ check_documented_skill_paths_resolve() {
   # `${CLAUDE_SKILL_DIR}/…`. Both are runner-supplied, so a typo or a rename inside one of those
   # strings cannot fail until a real run, in the middle of a phase, as `bash: no such file`.
   # Substituting the real directory here is what turns that into a test failure instead.
+  #
+  # The repo is flat (`md_<name>/SKILL.md` at the top level) while the INSTALLED tree the variables
+  # address is `<host>/skills/<name>/…`. So each variable gets both readings and one has to hold:
+  # against the skill's own directory (the flat repo, and what SKILL_DIR always means), and — for
+  # PLUGIN_ROOT with a `skills/<name>/` prefix — against that named sibling skill at the repo top
+  # level. Accepting either is not a loosening: the tail after the anchor is still checked
+  # character for character, so a renamed script or a misspelled reference still fails.
   local prog out
   prog="$(mktemp "${TMPDIR:-/tmp}/skillpath.XXXXXX.py")"
   cat >"$prog" <<'PY'
@@ -431,6 +441,9 @@ import os, re, sys
 VAR = re.compile(r"\$\{CLAUDE_(?:PLUGIN_ROOT|SKILL_DIR)\}([A-Za-z0-9_./*-]*)")
 bad = []
 for root in sys.argv[1:]:
+    # `root` is one skill directory, e.g. ./md_codegraph/ — its parent is the repo top level,
+    # which is where a `skills/<name>/` tail has to be resolved now that the layout is flat.
+    repo = os.path.dirname(root.rstrip("/")) or "."
     for base, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in {".git", "__pycache__"}]
         for name in files:
@@ -439,21 +452,19 @@ for root in sys.argv[1:]:
             path = os.path.join(base, name)
             text = open(path, encoding="utf-8", errors="replace").read()
             for match in VAR.finditer(text):
-                tail = match.group(1).rstrip("/*.,`)")
-                # PLUGIN_ROOT is the skill DIRECTORY's parent (it holds skills/ and agents/);
-                # SKILL_DIR is the skill directory itself. One variable, two anchors.
-                anchor = root if "PLUGIN_ROOT" in match.group(0) else os.path.join(root, "skills")
-                if "SKILL_DIR" in match.group(0):
-                    cand = [os.path.join(anchor, d, tail.lstrip("/"))
-                            for d in os.listdir(anchor) if os.path.isdir(os.path.join(anchor, d))]
-                else:
-                    cand = [os.path.join(anchor, tail.lstrip("/"))]
+                tail = match.group(1).rstrip("/*.,`)").lstrip("/")
+                # SKILL_DIR is the skill directory itself. PLUGIN_ROOT is the installed tree's
+                # skills/ parent, so `skills/<name>/…` names a skill that is now a top-level
+                # sibling; without that prefix it addresses the skill's own files.
+                cand = [os.path.join(root, tail)]
+                if "PLUGIN_ROOT" in match.group(0) and tail.startswith("skills/"):
+                    cand.append(os.path.join(repo, tail[len("skills/"):]))
                 if not any(os.path.exists(c) for c in cand):
                     bad.append(f"{os.path.relpath(path, root)}: {match.group(0)}")
 for line in sorted(set(bad)):
     print(line)
 PY
-  out=$(cd "$ROOT" && python3 "$prog" ./*/ )
+  out=$(cd "$ROOT" && python3 "$prog" ./md_*/ )
   rm -f -- "$prog"
   if [ -n "$out" ]; then
     fail "a documented \${CLAUDE_*} path does not exist"
@@ -468,7 +479,7 @@ check_documented_caps_keys_carry_a_severity() {
   # the bare metric as a totals key — `"unparseable": 0` — teaches a gate to read a key the tool
   # never prints, and `.get(key, 0) == 0` then passes forever on a repo full of unreadable files.
   local out
-  out=$(cd "$ROOT" && python3 - ./*/ <<'PY'
+  out=$(cd "$ROOT" && python3 - ./md_*/ <<'PY'
 import os, re, sys
 METRICS = {"file_lines", "method_lines", "nesting", "loop_body", "else", "params",
            "public_members", "unparseable", "exempt_without_reason", "unbalanced_braces"}
@@ -506,7 +517,7 @@ check_documented_graph_keys_have_the_documented_type() {
   # plain `string[]` — so a consumer doing `h["node"]` raises TypeError, and a model that instead
   # "fills in" median_fan_in has fabricated a number, which the skill calls a hard error. Spelling
   # alone cannot catch that: only the real output, parsed, against the documented type.
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
@@ -549,7 +560,7 @@ check_apply_gate_permits_multi_slice_progress() {
   # approval they just gave. `apply all` could never reach slice 2, and neither could the bare
   # `/md_codegraph` resume that SKILL.md calls the whole interface. It failed CLOSED, so nothing was
   # unsafe; the feature was simply unreachable. Doc-level check, because `apply` is model-driven.
-  local f="$ROOT"/*/skills/*/jobs/apply.md
+  local f="$ROOT"/md_*/jobs/apply.md
   # shellcheck disable=SC2086
   set -- $f
   [ -f "${1:-}" ] || { info "no apply.md to test"; return; }
@@ -569,36 +580,17 @@ PY
   fi
 }
 
-check_plugin_manifest_targets_exist() {
-  local bad=0 m
-  for m in $(cd "$ROOT" && ls ./*/.claude-plugin/plugin.json 2>/dev/null); do
-    local dir; dir=$(dirname -- "$(dirname -- "$ROOT/$m")")
-    local missing
-    missing=$(python3 - "$ROOT/$m" "$dir" <<'PY'
-import json, sys, os
-manifest, base = sys.argv[1], sys.argv[2]
-try:
-    data = json.load(open(manifest))
-except Exception as exc:
-    print(f"unparseable manifest: {exc}"); raise SystemExit
-for key in ("agents", "commands", "hooks", "skills"):
-    for rel in data.get(key, []) or []:
-        if isinstance(rel, str) and not os.path.exists(os.path.join(base, rel)):
-            print(f"{key}: {rel}")
-PY
-)
-    if [ -n "$missing" ]; then
-      fail "plugin.json references missing files ($m)"
-      printf '%s\n' "$missing" | sed 's/^/      /'
-      bad=1
-    fi
-  done
-  [ "$bad" -eq 0 ] && pass "every plugin.json target exists"
-}
+# check_plugin_manifest_targets_exist is GONE, not disabled. The flatten removed the plugin layer
+# entirely: there are no `.claude-plugin/plugin.json` manifests left to validate, so the loop had
+# nothing to iterate and printed PASS over an empty set — a green line asserting a property of
+# files that do not exist, which is worse than no line at all. The invariant it protected (every
+# path a manifest promises resolves) now lives in check_reference_index_targets_exist, which reads
+# SKILL.md's own index, and in check_documented_skill_paths_resolve for `${CLAUDE_*}` paths. If a
+# manifest layer ever comes back, this check has to come back with it.
 
 check_reference_index_targets_exist() {
   local bad=0 s
-  for s in $(cd "$ROOT" && ls ./*/skills/*/SKILL.md 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/SKILL.md 2>/dev/null); do
     local dir; dir=$(dirname -- "$ROOT/$s")
     local missing=""
     # Index rows look like: | `references/foo.md` | ... |
@@ -619,8 +611,13 @@ check_every_file_is_reachable() {
   # A file nothing links to is a file no model will ever open. Every job and reference
   # must be cited by at least one OTHER file in the same skill. SKILL.md is the root and
   # is exempt; so is anything under specs/ (those are output templates, not read by name).
+  # The candidate set is jobs/*.md and references/*.md ONLY, which is also what keeps a file at
+  # the skill ROOT out of it: md_codegraph/SPEC.md is the skill's own design record and
+  # md_*/agents/*.md are loaded by the runner from frontmatter, never cited by basename in prose,
+  # so neither is orphanable — while both still COUNT as citers, because a reference an agent
+  # tells the model to open is reachable exactly as a reference SKILL.md names.
   local bad=0 s
-  for s in $(cd "$ROOT" && ls ./*/skills/*/SKILL.md 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/SKILL.md 2>/dev/null); do
     local dir; dir=$(dirname -- "$ROOT/$s")
     local orphans="" f rel
     for f in "$dir"/jobs/*.md "$dir"/references/*.md; do
@@ -647,7 +644,7 @@ check_documented_flags_are_accepted() {
   # the model runs it, gets exit 2, and has no fallback. Every `script.sh --flag` that
   # appears in shipped markdown must be in that script's own argument parser.
   local bad=0 sc
-  for sc in $(cd "$ROOT" && ls ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for sc in $(cd "$ROOT" && ls ./md_*/scripts/*.sh 2>/dev/null); do
     local base; base=$(basename -- "$sc")
     local skill; skill=$(dirname -- "$(dirname -- "$ROOT/$sc")")
     # flags the parser actually handles, taken from its own case arms
@@ -691,7 +688,7 @@ check_file_length_caps() {
   # and every other shipped prose file <=600 because a reference is loaded whole. Asserted in a
   # checklist, both drifted; here they cost nothing to keep true.
   local bad=0 f n
-  for f in $(cd "$ROOT" && ls ./*/skills/*/SKILL.md 2>/dev/null); do
+  for f in $(cd "$ROOT" && ls ./md_*/SKILL.md 2>/dev/null); do
     n=$(wc -l <"$ROOT/$f" | tr -d ' ')
     [ "$n" -le 250 ] || { fail "$f is $n lines (router cap 250)"; bad=1; }
   done
@@ -700,14 +697,14 @@ check_file_length_caps() {
     n=$(wc -l <"$f" | tr -d ' ')
     [ "$n" -le 600 ] || { fail "${f#$ROOT/} is $n lines (prose cap 600)"; bad=1; }
   done <<EOF
-$(cd "$ROOT" && find ./*/ -name '*.md' -not -path '*/.git/*' | sed "s|^\.|$ROOT|")
+$(cd "$ROOT" && find ./md_*/ -name '*.md' -not -path '*/.git/*' | sed "s|^\.|$ROOT|")
 EOF
   [ "$bad" -eq 0 ] && pass "SKILL.md is within 250 lines and every prose file within 600"
 }
 
 check_skill_frontmatter() {
   local bad=0 s
-  for s in $(cd "$ROOT" && ls ./*/skills/*/SKILL.md 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/SKILL.md 2>/dev/null); do
     head -1 "$ROOT/$s" | grep -q '^---$' || { fail "$s has no YAML frontmatter"; bad=1; continue; }
     grep -qE '^name:' "$ROOT/$s" || { fail "$s frontmatter has no name:"; bad=1; }
     grep -qE '^description:' "$ROOT/$s" || { fail "$s frontmatter has no description:"; bad=1; }
@@ -717,7 +714,7 @@ check_skill_frontmatter() {
 
 check_agent_frontmatter() {
   local bad=0 a
-  local list; list=$(cd "$ROOT" && ls ./*/agents/*.md 2>/dev/null || true)
+  local list; list=$(cd "$ROOT" && ls ./md_*/agents/*.md 2>/dev/null || true)
   [ -n "$list" ] || { info "no bundled agents to check"; return; }
   for a in $list; do
     local stem; stem=$(basename -- "$a" .md)
@@ -758,7 +755,7 @@ PY
 }
 
 check_caps_finds_known_violations() {
-  local script="$ROOT"/*/skills/*/scripts/caps.sh
+  local script="$ROOT"/md_*/scripts/caps.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no caps.sh to test"; return; }
@@ -785,7 +782,7 @@ PY
 check_graph_cycles_mode_agrees_with_full() {
   # --cycles is a PROJECTION of --json, not a second measurement. If the two ever disagree,
   # the refine loop is being gated on a number the report does not contain.
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
@@ -809,7 +806,7 @@ PY
 }
 
 check_graph_finds_known_cycle() {
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
@@ -841,7 +838,7 @@ check_graph_resolves_bare_sibling_imports() {
   # ONLY while it stays scoped to the importer's own directory: that scope is what keeps
   # `import json` from binding to some distant json.py. A fix that resolved bare names globally
   # would pass the first assertion and fail the second, which is exactly what must not ship.
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
@@ -887,7 +884,7 @@ check_relative_imports_do_not_invent_absolute_targets() {
   # COUNT, so levels climbed is `level - 1`: `keep == 0` lands exactly ON the root and is LEGAL,
   # only `keep < 0` is the error. A fix that refuses `keep <= 0` silences the false edge and takes
   # a true one with it, and would pass the second assertion below while failing the first.
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
@@ -924,7 +921,7 @@ check_graph_degrades_when_a_file_was_not_read() {
   #
   # Two causes, one verdict, because the word is what downstream reads: unparseable source, and a
   # file emit_path refused. caps.sh already got this right, and that asymmetry is what hid it.
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
@@ -958,8 +955,8 @@ check_line_counts_are_exact() {
   # `minor` under the 250 hard cap it actually breaches — fitness test F7 (`*_major == 0`) stays
   # green on a file over the wall. `src.count("\n") + 1` went the other way and inflated every
   # `loc` by one per file, so a 5 000-file repo published a total 5 000 lines too big.
-  local caps="$ROOT"/*/skills/*/scripts/caps.sh
-  local graph="$ROOT"/*/skills/*/scripts/graph.sh
+  local caps="$ROOT"/md_*/scripts/caps.sh
+  local graph="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $caps $graph
   [ -f "${1:-}" ] && [ -f "${2:-}" ] || { info "no scripts to test"; return; }
@@ -1002,7 +999,7 @@ if total != 261:
 }
 
 check_graph_text_mode_runs() {
-  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  local script="$ROOT"/md_*/scripts/graph.sh
   # shellcheck disable=SC2086
   set -- $script
   [ -f "${1:-}" ] || return
@@ -1016,7 +1013,7 @@ check_graph_text_mode_runs() {
 
 check_scripts_emit_valid_json() {
   local bad=0 s
-  for s in $(cd "$ROOT" && ls ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/scripts/*.sh 2>/dev/null); do
     local out
     out=$(bash "$ROOT/$s" --root "$FIXTURE" --json 2>/dev/null) || { fail "$s exited non-zero"; bad=1; continue; }
     printf '%s' "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
@@ -1035,7 +1032,7 @@ check_scripts_are_read_only() {
   local before after
   before=$(tree_digest "$FIXTURE")
   local s
-  for s in $(cd "$ROOT" && ls ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/scripts/*.sh 2>/dev/null); do
     bash "$ROOT/$s" --root "$FIXTURE" --json >/dev/null 2>&1
   done
   after=$(tree_digest "$FIXTURE")
@@ -1079,7 +1076,7 @@ check_hostile_names_cannot_inject_or_escape() {
   local out rc=0
   rm -f PWNED_SUBST PWNED_BT PWNED_SEMI "$d"/PWNED_* 2>/dev/null || true
   local s
-  for s in $(cd "$ROOT" && ls ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/scripts/*.sh 2>/dev/null); do
     out=$(bash "$ROOT/$s" --root "$d" --json 2>/dev/null) || true
     # 1. output must still be parseable: a filename must never be a JSON injection point
     printf '%s' "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
@@ -1114,7 +1111,7 @@ check_unsafe_names_are_declared_not_silently_dropped() {
   # scanner cannot carry must appear in degraded and must pull fidelity off "native", or a
   # hostile repo hides every violation by renaming one file.
   local d; d=$(hostile_fixture)
-  local script="$ROOT"/*/skills/*/scripts/caps.sh
+  local script="$ROOT"/md_*/scripts/caps.sh
   # shellcheck disable=SC2086
   set -- $script
   if [ ! -f "${1:-}" ]; then info "no caps.sh to test"; rm -rf -- "$d"; return; fi
@@ -1144,7 +1141,7 @@ check_metacharacter_root_still_reports() {
     d="$base/$frag"; mkdir -p "$d"
     printf 'x = 1\n%.0s' $(seq 300) > "$d/big.py"
     local out
-    out=$(bash "$ROOT"/*/skills/*/scripts/caps.sh --root "$d" --json 2>/dev/null) || true
+    out=$(bash "$ROOT"/md_*/scripts/caps.sh --root "$d" --json 2>/dev/null) || true
     printf '%s' "$out" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
@@ -1172,7 +1169,7 @@ check_target_git_config_is_not_honoured() {
   git -C "$d" config core.fsmonitor "$d/payload.sh"
   rm -f "$marker"
   local s rc=0
-  for s in $(cd "$ROOT" && ls ./*/skills/*/scripts/*.sh 2>/dev/null); do
+  for s in $(cd "$ROOT" && ls ./md_*/scripts/*.sh 2>/dev/null); do
     bash "$ROOT/$s" --root "$d" --json >/dev/null 2>&1
     [ -e "$marker" ] && { fail "$(basename "$s"): ran a command from the target's git config"; rc=1; }
     rm -f "$marker"
@@ -1187,8 +1184,8 @@ check_copied_caps_agree_across_skills() {
   # dependency, so the drift is what this check forbids — the two tables must agree row by row on
   # every limit they share, and codegraph's is the source.
   local source_table copy_table
-  source_table=$(cd "$ROOT" && ls ./*/skills/md_codegraph/SKILL.md 2>/dev/null | head -1)
-  copy_table=$(cd "$ROOT" && ls ./*/skills/md_policy-code-review/references/graph-policy.md 2>/dev/null | head -1)
+  source_table=$(cd "$ROOT" && ls ./md_codegraph/SKILL.md 2>/dev/null | head -1)
+  copy_table=$(cd "$ROOT" && ls ./md_policy-code-review/references/graph-policy.md 2>/dev/null | head -1)
   if [ -z "$source_table" ] || [ -z "$copy_table" ]; then
     return  # one of the two skills is not in this checkout; nothing to compare
   fi
@@ -1247,7 +1244,6 @@ check_installer_installs_into_codex_home
 check_installer_stays_inside_its_two_roots
 
 head2 "WIRING"
-check_plugin_manifest_targets_exist
 check_documented_skill_paths_resolve
 check_documented_caps_keys_carry_a_severity
 check_documented_graph_keys_have_the_documented_type

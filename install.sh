@@ -105,11 +105,13 @@ while [ $# -gt 0 ]; do
 done
 
 # --- locate the source tree -------------------------------------------------
-# A source tree is any directory holding <skill_dir>/skills/<name>/SKILL.md.
+# A source tree is any directory holding md_<name>/SKILL.md at its top level. The `md_` prefix is
+# the discovery contract: every skill directory carries it, so sibling top-level directories
+# (tests/, .github/, docs/) can never be mistaken for a skill.
 
 has_skills() {
   local root=$1 d
-  for d in "$root"/*/skills/*/; do
+  for d in "$root"/md_*/; do
     [ -f "$d/SKILL.md" ] && return 0
   done
   return 1
@@ -288,7 +290,7 @@ if [ "$DRY_RUN" -eq 1 ] && [ ! -d "$SRC" ]; then
   exit 0
 fi
 [ -n "$SRC" ] && [ -d "$SRC" ] || die "could not resolve a source tree"
-has_skills "$SRC" || die "no skills found under $SRC (expected */skills/*/SKILL.md)"
+has_skills "$SRC" || die "no skills found under $SRC (expected md_*/SKILL.md)"
 
 say "==> source:      $SRC"
 say "==> destination: $SKILLS_DIR  (mode: $MODE)"
@@ -296,17 +298,18 @@ run mkdir -p "$SKILLS_DIR"
 
 installed=0
 claimed=""
-for skill in "$SRC"/*/skills/*/; do
+for skill in "$SRC"/md_*/; do
   skill=${skill%/}
   [ -f "$skill/SKILL.md" ] || continue
   name=$(basename -- "$skill")
   dest="$SKILLS_DIR/$name"
 
-  # A skill NAME is the install identity, but the repo layout is */skills/<name>/, so two
-  # skill directories can carry the same name. Installing both would silently leave one
-  # unreachable and still report "installed 2". Refuse instead: the layout is meant to grow.
+  # A skill NAME is the install identity, and it is the top-level md_<name>/ directory name
+  # verbatim. The claim check outlives the flat layout on purpose: if discovery ever spans a
+  # second root, two directories could carry one name, and installing both would silently
+  # leave one unreachable while still reporting "installed 2". Refuse instead.
   case "$claimed" in
-    *"|$name|"*) die "two skills are both named '$name' (second: $skill) — rename one; the install name is the directory name under skills/" ;;
+    *"|$name|"*) die "two skills are both named '$name' (second: $skill) — rename one; the install name is the md_* directory name" ;;
   esac
   claimed="$claimed|$name|"
 
@@ -319,7 +322,7 @@ done
 [ "$installed" -gt 0 ] || die "installed nothing"
 
 # --- bundled subagents ------------------------------------------------------
-# `skills/codegraph/SKILL.md` fans out to `codegraph-cartographer`, `-inspector`, `-architect`,
+# `md_codegraph/SKILL.md` fans out to `codegraph-cartographer`, `-inspector`, `-architect`,
 # `-adversary` and `-surgeon`. Without them every dimension falls back to `general-purpose` with
 # the job file inlined — the pipeline still runs, but the agent-level guard rails (write-scope,
 # the seven-field finding contract, the ≤25-line return) come back as prose instead of as the
@@ -364,7 +367,7 @@ codex_wanted() {
 codex=0
 if codex_wanted; then
   run mkdir -p "$CODEX_SKILLS_DIR"
-  for skill in "$SRC"/*/skills/*/; do
+  for skill in "$SRC"/md_*/; do
     skill=${skill%/}
     [ -f "$skill/SKILL.md" ] || continue
     name=$(basename -- "$skill")
