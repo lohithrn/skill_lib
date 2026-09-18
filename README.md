@@ -26,9 +26,19 @@ That symlinks every `*/skills/<name>/` in this repo into `~/.claude/skills/<name
 available in every project. Without the agents the pipeline still runs, but each dimension falls
 back to `general-purpose` with the job file inlined.
 
+**Codex gets the same skill.** Codex reads the identical layout — `<codex home>/skills/<name>/SKILL.md`
+with `name` + `description` frontmatter — so when `~/.codex` already exists the installer links the
+**same directory** there too: one source of truth, no second copy to drift. `--codex` installs there
+even if the directory has to be created, `--no-codex` skips it, and `CODEX_HOME` relocates it.
+Codex has no subagent files, so `/codegraph` takes SKILL.md's documented serial fallback there and
+says so in its verdict line. If your Codex build wants an explicit slash trigger, add
+`trigger: /codegraph` to the skill's frontmatter — Claude Code ignores the key.
+
 | Command | Effect |
 | --- | --- |
 | `bash install.sh` | install (symlink into the checkout — edits show up immediately) |
+| `bash install.sh --codex` | also install into Codex, creating `~/.codex/skills/` if needed |
+| `bash install.sh --no-codex` | Claude Code only, even if `~/.codex` exists |
 | `bash install.sh --update` | `git pull` (or clone into `~/.claude/skill_lib`), then install |
 | `bash install.sh --copy` | install a detached snapshot instead of a symlink |
 | `bash install.sh --list` | show what is installed and where it points |
@@ -36,8 +46,9 @@ back to `general-purpose` with the job file inlined.
 | `bash install.sh --uninstall` | remove the symlinks this installer created |
 | `bash install.sh --help` | all options |
 
-Overridable: `CLAUDE_CONFIG_DIR` (default `~/.claude`), `SKILL_LIB_REPO`, `SKILL_LIB_BRANCH`.
-The installer writes only under `CLAUDE_CONFIG_DIR`, never needs `sudo`, never executes code from
+Overridable: `CLAUDE_CONFIG_DIR` (default `~/.claude`), `CODEX_HOME` (default `~/.codex`),
+`SKILL_LIB_REPO`, `SKILL_LIB_BRANCH`.
+The installer writes only under those two roots, never needs `sudo`, never executes code from
 the repo it installs, and moves any pre-existing skill of the same name aside to
 `<name>.backup.<timestamp>` rather than overwriting it.
 

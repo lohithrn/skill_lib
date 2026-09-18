@@ -241,7 +241,8 @@ check_scripts_set_safe_flags() {
 check_installer_writes_nothing_on_dry_run() {
   local sandbox
   sandbox=$(mktemp -d)
-  CLAUDE_CONFIG_DIR="$sandbox/cfg" bash "$ROOT/install.sh" --dry-run >/dev/null 2>&1
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" --dry-run >/dev/null 2>&1
   if [ -e "$sandbox/cfg" ]; then
     fail "install.sh --dry-run created $sandbox/cfg"
   else
@@ -253,7 +254,8 @@ check_installer_writes_nothing_on_dry_run() {
 check_installer_round_trip() {
   local sandbox out
   sandbox=$(mktemp -d)
-  if ! out=$(CLAUDE_CONFIG_DIR="$sandbox/cfg" bash "$ROOT/install.sh" 2>&1); then
+  if ! out=$(CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+             bash "$ROOT/install.sh" 2>&1); then
     fail "install.sh failed: $(printf '%s' "$out" | tail -1)"
     rm -rf -- "$sandbox"; return
   fi
@@ -270,7 +272,8 @@ check_installer_round_trip() {
   else
     pass "install.sh installed $n skill(s), each with a reachable SKILL.md"
   fi
-  CLAUDE_CONFIG_DIR="$sandbox/cfg" bash "$ROOT/install.sh" --uninstall >/dev/null 2>&1
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" --uninstall >/dev/null 2>&1
   if ls "$sandbox/cfg/skills"/* "$sandbox/cfg/agents"/* >/dev/null 2>&1; then
     fail "install.sh --uninstall left files behind"
   else
@@ -288,7 +291,8 @@ check_installer_installs_the_bundled_agents() {
   sandbox=$(mktemp -d)
   want=$(cd "$ROOT" && ls ./*/agents/*.md 2>/dev/null | wc -l | tr -d ' ')
   [ "$want" -gt 0 ] || { info "no bundled agents to install"; rm -rf -- "$sandbox"; return; }
-  CLAUDE_CONFIG_DIR="$sandbox/cfg" bash "$ROOT/install.sh" >/dev/null 2>&1
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" >/dev/null 2>&1
   got=$(ls "$sandbox/cfg/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
   # Reachable, not merely present: a symlink to a path that moved installs a broken agent.
   local broken=0 f
@@ -298,6 +302,64 @@ check_installer_installs_the_bundled_agents() {
   else
     fail "installed $got of $want bundled agents (unreadable: $broken)"
   fi
+  rm -rf -- "$sandbox"
+}
+
+check_installer_stays_inside_its_two_roots() {
+  # This exact leak happened: the tests sandboxed CLAUDE_CONFIG_DIR only, so `auto` mode saw the
+  # REAL ~/.codex, installed there, and left a symlink into a temp dir that the test then deleted —
+  # a dangling skill in the user's own config, produced by running the test suite. A test that can
+  # modify the machine it is testing is worse than no test.
+  local sandbox before_c before_x after_c after_x
+  sandbox=$(mktemp -d)
+  before_c=$(ls -A "$HOME/.claude/skills" 2>/dev/null | wc -l | tr -d ' ')
+  before_x=$(ls -A "$HOME/.codex/skills" 2>/dev/null | wc -l | tr -d ' ')
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" --codex >/dev/null 2>&1
+  after_c=$(ls -A "$HOME/.claude/skills" 2>/dev/null | wc -l | tr -d ' ')
+  after_x=$(ls -A "$HOME/.codex/skills" 2>/dev/null | wc -l | tr -d ' ')
+  [ "$before_c" = "$after_c" ] && [ "$before_x" = "$after_x" ] \
+    && pass "a sandboxed install touches neither real config root" \
+    || fail "install leaked outside its roots (claude $before_c->$after_c, codex $before_x->$after_x)"
+  rm -rf -- "$sandbox"
+}
+
+check_installer_installs_into_codex_home() {
+  # Codex reads the same `<home>/skills/<name>/SKILL.md` layout, so the second host is one more
+  # destination for the SAME directory — not a fork. Three properties matter and none is visible
+  # from the Claude-only path: the skill lands and is reachable, `--no-codex` leaves the Codex home
+  # untouched, and `--uninstall` takes the Codex symlink with it (a stale link there points at a
+  # deleted checkout and Codex would surface the skill as broken rather than absent).
+  local sandbox
+  sandbox=$(mktemp -d)
+  mkdir -p "$sandbox/codex"
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" >/dev/null 2>&1
+  if [ -f "$sandbox/codex/skills"/*/SKILL.md ] 2>/dev/null; then
+    pass "install.sh installs into a Codex home too, and the SKILL.md is reachable"
+  else
+    fail "install.sh installed nothing into the Codex home"
+  fi
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" --uninstall >/dev/null 2>&1
+  ls "$sandbox/codex/skills"/* >/dev/null 2>&1 \
+    && fail "--uninstall left a skill in the Codex home" \
+    || pass "--uninstall clears the Codex home too"
+  check_no_codex_writes_nothing
+  rm -rf -- "$sandbox"
+}
+
+check_no_codex_writes_nothing() {
+  # A separate sandbox, because the assertion is "not one byte", and reusing the one above would
+  # be asserting that against a directory this test already wrote to.
+  local sandbox n
+  sandbox=$(mktemp -d)
+  mkdir -p "$sandbox/codex"
+  CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
+    bash "$ROOT/install.sh" --no-codex >/dev/null 2>&1
+  n=$(ls -A "$sandbox/codex" 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" -eq 0 ] && pass "--no-codex writes nothing into the Codex home" \
+                 || fail "--no-codex wrote $n entry/entries into the Codex home"
   rm -rf -- "$sandbox"
 }
 
@@ -324,7 +386,7 @@ installer_clone_run() {
   # and the second `git fetch`/`reset --hard`, and only the second could regress on git's chatter.
   local sandbox=$1 branch=$2 phase=$3 out flag=""
   [ "$phase" = update ] && flag="--update"
-  out=$(CLAUDE_CONFIG_DIR="$sandbox/cfg" SKILL_LIB_REPO="file://$ROOT" \
+  out=$(CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" SKILL_LIB_REPO="file://$ROOT" \
         SKILL_LIB_BRANCH="$branch" bash "$sandbox/bin/install.sh" $flag 2>&1) || {
     fail "install.sh $phase from a clone failed: $(printf '%s' "$out" | tail -1)"; return 1; }
   [ -f "$sandbox/cfg/skills"/*/SKILL.md ] 2>/dev/null \
@@ -955,6 +1017,8 @@ check_installer_writes_nothing_on_dry_run
 check_installer_round_trip
 check_installer_installs_the_bundled_agents
 check_installer_clone_path_installs
+check_installer_installs_into_codex_home
+check_installer_stays_inside_its_two_roots
 
 head2 "WIRING"
 check_plugin_manifest_targets_exist

@@ -29,6 +29,14 @@ SKILLS_DIR="$CLAUDE_DIR/skills"
 AGENTS_DIR="$CLAUDE_DIR/agents"
 CACHE_DIR="$CLAUDE_DIR/skill_lib"
 
+# Codex reads the SAME layout — `<codex home>/skills/<name>/SKILL.md`, frontmatter `name` +
+# `description` — so one skill directory serves both hosts and neither gets a divergent copy.
+# CODEX_HOME is Codex's own relocation variable; honouring it is what makes this testable.
+# Default is `auto`: install there when a Codex home already exists, never create one uninvited.
+CODEX_DIR="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
+CODEX_SKILLS_DIR="$CODEX_DIR/skills"
+CODEX=auto
+
 MODE=link
 ACTION=install
 DRY_RUN=0
@@ -63,11 +71,18 @@ Usage: install.sh [options]
   --link         symlink into the checkout (default)
   --list         list installed skills and their sources, then exit
   --uninstall    remove skills this script installed, then exit
+  --codex        also install into Codex, creating its skills dir if needed
+  --no-codex     install for Claude Code only
   --dry-run      print what would happen, change nothing
   -h, --help     this text
 
+Hosts: Claude Code always; Codex too when a Codex home already exists (both read
+<host>/skills/<name>/SKILL.md, so it is the same directory, not a second copy).
+Codex has no subagent files, so the fan-out falls back as SKILL.md documents.
+
 Environment:
   CLAUDE_CONFIG_DIR   config root                (default: ~/.claude)
+  CODEX_HOME          Codex config root          (default: ~/.codex)
   SKILL_LIB_REPO      repo to clone when needed  (default: the public skill_lib repo)
   SKILL_LIB_BRANCH    branch to track            (default: main)
 EOF
@@ -80,6 +95,8 @@ while [ $# -gt 0 ]; do
     --link)      MODE=link ;;
     --list)      ACTION=list ;;
     --uninstall) ACTION=uninstall ;;
+    --codex)     CODEX=yes ;;
+    --no-codex)  CODEX=no ;;
     --dry-run)   DRY_RUN=1 ;;
     -h|--help)   usage; exit 0 ;;
     *)           die "unknown option: $1 (try --help)" ;;
@@ -138,6 +155,59 @@ resolve_source() {
   sync_cache
 }
 
+# --- placing one skill, for either host -------------------------------------
+# Both hosts read `<home>/skills/<name>/SKILL.md`, so the placement rule is one rule. It lives in
+# two functions rather than one because "make room at the destination" and "put the skill there"
+# fail for different reasons and the first must be able to refuse without the second running.
+
+# Preserve anything already there that we did not put there. A symlink is only OURS if it points
+# into the cache or the source tree — a user's own link to their own skill is not ours to delete,
+# and --uninstall never restores backups, so a silent rm is unrecoverable.
+clear_destination() {
+  local dest=$1 label=$2 existing backup
+  backup="$dest.backup.$(date +%Y%m%d%H%M%S)"
+  if [ -L "$dest" ]; then
+    existing=$(readlink -- "$dest" || true)
+    case "$existing" in
+      "$CACHE_DIR"/*|"$SRC"/*) run rm -- "$dest"; return 0 ;;
+    esac
+    warn "  existing $label is a link this installer did not create ($existing) -> moving to $(basename -- "$backup")"
+    run mv -- "$dest" "$backup"
+    return 0
+  fi
+  [ -e "$dest" ] || return 0
+  warn "  existing $label was not installed by this script -> moving to $(basename -- "$backup")"
+  run mv -- "$dest" "$backup"
+}
+
+place_skill() {
+  local skill=$1 dest=$2 label=$3 stage
+  if [ "$MODE" = link ]; then
+    run ln -s -- "$skill" "$dest"
+    done_msg "  linked $label"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then stage='<tmpdir>'; else
+    stage=$(mktemp -d "${TMPDIR:-/tmp}/skill_lib.XXXXXX"); fi
+  copy_tree "$skill" "$stage/$(basename -- "$dest")"
+  run mv -- "$stage/$(basename -- "$dest")" "$dest"
+  run rm -rf -- "$stage"
+  done_msg "  copied $label"
+}
+
+# __pycache__ is gitignored, so it is never pushed — but it IS present in a working tree that has
+# run the scanners, and a copy install would ship stale bytecode into the user's config directory.
+copy_tree() {
+  local from=$1 to=$2
+  if command -v rsync >/dev/null 2>&1; then
+    run rsync -a --exclude '.git' --exclude '__pycache__' --exclude '*.pyc' -- "$from/" "$to/"
+    return 0
+  fi
+  run mkdir -p "$to"
+  run cp -R -- "$from/." "$to/"
+  run find "$to" -name '__pycache__' -type d -prune -exec rm -rf -- {} +
+}
+
 # --- list / uninstall -------------------------------------------------------
 
 if [ "$ACTION" = list ]; then
@@ -156,6 +226,13 @@ if [ "$ACTION" = list ]; then
     [ -e "$d" ] || continue
     if [ -L "$d" ]; then say "agent $(basename -- "$d")  ->  $(readlink -- "$d")"
     else                  say "agent $(basename -- "$d")  (copy)"; fi
+  done
+  for d in "$CODEX_SKILLS_DIR"/*; do
+    [ -e "$d" ] || continue
+    [ -f "$d/SKILL.md" ] || [ -L "$d" ] || continue
+    case "$d" in *.backup.*) continue ;; esac
+    if [ -L "$d" ]; then say "codex $(basename -- "$d")  ->  $(readlink -- "$d")"
+    else                  say "codex $(basename -- "$d")  (copy)"; fi
   done
   exit 0
 fi
@@ -182,6 +259,17 @@ if [ "$ACTION" = uninstall ]; then
       "$CACHE_DIR"/*|"${src:-/nonexistent}"/*)
         say "==> removing agent symlink $(basename -- "$d")"; run rm -- "$d"; removed=1 ;;
       *) warn "skipping agent $(basename -- "$d") (symlink outside this repo: $target)" ;;
+    esac
+  done
+  # Same ours/theirs test in the Codex home: a symlink pointing into the cache or this checkout is
+  # ours, anything else is the user's and stays. Copies are left for the same reason as above.
+  for d in "$CODEX_SKILLS_DIR"/*; do
+    [ -L "$d" ] || continue
+    target=$(readlink -- "$d")
+    case "$target" in
+      "$CACHE_DIR"/*|"${src:-/nonexistent}"/*)
+        say "==> removing codex symlink $(basename -- "$d")"; run rm -- "$d"; removed=1 ;;
+      *) warn "skipping codex $(basename -- "$d") (symlink outside this repo: $target)" ;;
     esac
   done
   [ "$removed" -eq 1 ] || say "nothing to uninstall (copied skills must be removed by hand)"
@@ -222,46 +310,8 @@ for skill in "$SRC"/*/skills/*/; do
   esac
   claimed="$claimed|$name|"
 
-  # Preserve anything already there that we did not put there. A symlink is only OURS if it
-  # points into the cache or the source tree — a user's own link to their own skill is not
-  # ours to delete, and --uninstall never restores backups, so a silent rm is unrecoverable.
-  if [ -L "$dest" ]; then
-    existing=$(readlink -- "$dest" || true)
-    case "$existing" in
-      "$CACHE_DIR"/*|"$SRC"/*)
-        run rm -- "$dest" ;;
-      *)
-        backup="$dest.backup.$(date +%Y%m%d%H%M%S)"
-        warn "  existing $name is a link this installer did not create ($existing) -> moving to $(basename -- "$backup")"
-        run mv -- "$dest" "$backup" ;;
-    esac
-  elif [ -e "$dest" ]; then
-    backup="$dest.backup.$(date +%Y%m%d%H%M%S)"
-    warn "  existing $name is not a link from this installer -> moving to $(basename -- "$backup")"
-    run mv -- "$dest" "$backup"
-  fi
-
-  if [ "$MODE" = link ]; then
-    run ln -s -- "$skill" "$dest"
-    done_msg "  linked $name"
-  else
-    if [ "$DRY_RUN" -eq 1 ]; then stage='<tmpdir>'; else
-      stage=$(mktemp -d "${TMPDIR:-/tmp}/skill_lib.XXXXXX"); fi
-    # __pycache__ is gitignored, so it is never pushed — but it IS present in a working tree
-    # that has run the scanners, and a copy install would ship stale bytecode into the user's
-    # config directory.
-    if command -v rsync >/dev/null 2>&1; then
-      run rsync -a --exclude '.git' --exclude '__pycache__' --exclude '*.pyc' \
-          -- "$skill/" "$stage/$name/"
-    else
-      run mkdir -p "$stage/$name"
-      run cp -R -- "$skill/." "$stage/$name/"
-      run find "$stage/$name" -name '__pycache__' -type d -prune -exec rm -rf -- {} +
-    fi
-    run mv -- "$stage/$name" "$dest"
-    run rm -rf -- "$stage"
-    done_msg "  copied $name"
-  fi
+  clear_destination "$dest" "$name"
+  place_skill "$skill" "$dest" "$name"
   # Counted only after the link or copy actually landed, so the summary cannot overstate.
   installed=$((installed + 1))
 done
@@ -299,6 +349,37 @@ for agent in "$SRC"/*/agents/*.md; do
   agents=$((agents + 1))
 done
 [ "$agents" -eq 0 ] || done_msg "installed $agents agent(s) into $AGENTS_DIR"
+
+# --- Codex ------------------------------------------------------------------
+# Same directory, second host. `auto` installs only when a Codex home already exists, because
+# creating ~/.codex for someone who does not run Codex is litter; `--codex` says do it anyway.
+codex_wanted() {
+  case "$CODEX" in
+    no)  return 1 ;;
+    yes) return 0 ;;
+    *)   [ -d "$CODEX_DIR" ] ;;
+  esac
+}
+
+codex=0
+if codex_wanted; then
+  run mkdir -p "$CODEX_SKILLS_DIR"
+  for skill in "$SRC"/*/skills/*/; do
+    skill=${skill%/}
+    [ -f "$skill/SKILL.md" ] || continue
+    name=$(basename -- "$skill")
+    clear_destination "$CODEX_SKILLS_DIR/$name" "$name (codex)"
+    place_skill "$skill" "$CODEX_SKILLS_DIR/$name" "$name (codex)"
+    codex=$((codex + 1))
+  done
+  done_msg "installed $codex skill(s) into $CODEX_SKILLS_DIR"
+  # Not a caveat about the install — a caveat about the RUN. Codex has no subagent files, so the
+  # dimensions cannot fan out there and SKILL.md's serial fallback is the path taken. Saying it
+  # here is cheaper than a user concluding the skill is broken because no agents appeared.
+  say "    note: Codex has no subagents; /codegraph runs its dimensions serially there"
+elif [ "$CODEX" = auto ] && [ -n "${CODEX_HOME:-}" ]; then
+  warn "note: CODEX_HOME is set to $CODEX_DIR but it does not exist; pass --codex to create it"
+fi
 
 say ""
 done_msg "installed $installed skill(s) into $SKILLS_DIR"
