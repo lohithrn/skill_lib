@@ -136,7 +136,7 @@ Steps
   5. Point `invoice_service.py` at the registry; delete the if/elif chain. Commit.
   6. Point `reporting/summary.py` at the registry; delete its duplicate switch. Commit.
   7. Wire in the composition root; delete the now-dead tier constant. Commit.
-Oracle       pytest -q · scripts/caps.sh src/billing · scripts/graph.sh --cycles
+Oracle       pytest -q · scripts/caps.sh --json --root src/billing · scripts/graph.sh --cycles
 Green when   suite passes, invoice_service.py ≤ 250 lines, 0 `else` in billing/, cycle count 4→3
 Revert       `git revert` steps 7→1 in reverse; steps 1-4 are additive and safe to leave
 Risk         GOLD tier had an undocumented rounding difference at :131 — characterization test
@@ -172,7 +172,7 @@ and its tool.
 | F4 | every port has a contract suite | tests/fitness/test_contract_coverage.py | custom |
 | F5 | utils imports nothing from src | .importlinter forbidden | import-linter |
 | F6 | no test imports a higher test layer | tests/fitness/test_layering.py | custom |
-| F7 | no file over 250 lines, no method over 15, no nesting over 2 | tests/fitness/test_caps.py | scripts/caps.sh |
+| F7 | zero `*_major` cap violations — the hard column only, read from `caps.sh --json`, never a number retyped here | tests/fitness/test_caps.py | scripts/caps.sh |
 ```
 
 F7 exists because the caps must be **a test, not a habit.**

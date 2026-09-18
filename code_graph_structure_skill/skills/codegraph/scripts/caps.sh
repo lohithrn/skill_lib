@@ -6,11 +6,30 @@
 #
 # The scanners live in lib/ and emit JSONL violations on stdout, one per line:
 #   {"file":"..","line":N,"metric":"..","value":N,"cap":N,"severity":"..","name":".."}
+#
+# Three responsibilities, three files, because this script was over its own 250-line cap:
+#   lib/caps_files.sh   WHICH files may be measured, and the path-safety trust boundary
+#   lib/caps_report.sh  HOW a finished scan is rendered (json, text)
+#   this file           the caps themselves, and the order the scanners run in
 
 set -uo pipefail
 
+# The scanners import each other, so python would drop `__pycache__/` into the installed skill
+# directory — a measurement tool that writes to the tree it was copied into. Nothing here is hot
+# enough for the cache to matter.
+export PYTHONDONTWRITEBYTECODE=1
+
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HERE/lib"
+
+# Sourced, not optional. Without either half this script cannot produce a correct answer, so a
+# missing part is exit 2 rather than a degraded scan: "no scanner" and "nothing wrong" must never
+# render the same, and that includes the case where the scanner itself is incomplete.
+for part in caps_files.sh caps_report.sh; do
+  [ -f "$LIB/$part" ] || { printf 'caps.sh: missing required part: lib/%s\n' "$part" >&2; exit 2; }
+  # shellcheck source=/dev/null
+  . "$LIB/$part"
+done
 
 # ---- caps: a knob per limit. Overridable so a repo can tighten, never loosen silently. ----
 CAP_FILE_WARN="${CG_CAP_FILE_WARN:-200}"
@@ -32,7 +51,7 @@ usage() {
   cat <<'EOF'
 caps.sh — measure file length, method length, nesting, loop bodies, else, params, public members.
 
-  caps.sh [--root PATH] [--json|--text] [--exclude GLOB] [--help]
+  caps.sh [--root PATH] [--json|--text] [--exclude REGEX] [--help]
 
 Caps are read from the environment so they are one place, not scattered:
   CG_CAP_FILE=250 CG_CAP_FILE_WARN=200
@@ -40,6 +59,13 @@ Caps are read from the environment so they are one place, not scattered:
   CG_CAP_NESTING=1 CG_CAP_LOOP_BODY=8
   CG_CAP_PARAMS=4 CG_CAP_PARAMS_WARN=3
   CG_CAP_PUBLIC=7 CG_CAP_PUBLIC_WARN=5
+
+Nesting is measured FROM THE METHOD BODY: the outermost construct is depth 0, so `for` + `if` is
+depth 1 and legal, and only a third level breaches. See SKILL.md "Hard limits".
+
+A cap breach can be declared exempt in the source with a pragma that names the metrics and gives
+a reason (`# codegraph:exempt nesting, loop_body -- <why>`); it is still reported, with severity
+"exempt". A pragma with no reason suppresses nothing and is reported as exempt_without_reason.
 
 Languages: python (AST-exact when python3 is present), typescript/javascript, java/kotlin, go
 (brace scan). Anything else is counted for FILE LENGTH ONLY and listed under "degraded".
@@ -53,7 +79,7 @@ while [ $# -gt 0 ]; do
     --root) ROOT="${2:?--root needs a path}"; shift 2 ;;
     --json) FORMAT="json"; shift ;;
     --text) FORMAT="text"; shift ;;
-    --exclude) EXCLUDE_EXTRA="${2:?--exclude needs a glob}"; shift 2 ;;
+    --exclude) EXCLUDE_EXTRA="${2:?--exclude needs a regex}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'caps.sh: unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -62,25 +88,34 @@ done
 [ -d "$ROOT" ] || { printf 'caps.sh: not a directory: %s\n' "$ROOT" >&2; exit 2; }
 ROOT="$(cd -- "$ROOT" && pwd)"
 
+# An unparseable --exclude makes `grep` exit non-zero, and the `|| cat` fallback would then pass the
+# UNFILTERED list through. Silently scanning what the caller asked to skip is worse than refusing.
+if [ -n "$EXCLUDE_EXTRA" ]; then
+  printf '' | grep -q -- "$EXCLUDE_EXTRA" 2>/dev/null
+  [ $? -le 1 ] || { printf 'caps.sh: --exclude is not a valid regex: %s\n' "$EXCLUDE_EXTRA" >&2; exit 2; }
+fi
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/caps.XXXXXX")" || exit 2
 trap 'rm -rf -- "$TMP"' EXIT
 VIOL="$TMP/violations.jsonl"; : >"$VIOL"
 DEGRADED="$TMP/degraded.txt"; : >"$DEGRADED"
 
-# ---- file discovery: git when available (respects .gitignore), else find ----
-PRUNE_DIRS='node_modules|\.git|dist|build|out|target|vendor|__pycache__|\.venv|venv|\.tox|\.next|coverage|\.mypy_cache|\.pytest_cache|migrations|generated|__generated__'
-list_files() {
-  if git -C "$ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
-    git -C "$ROOT" ls-files -z | tr '\0' '\n' | sed "s|^|$ROOT/|"
-  else
-    find "$ROOT" -type f -print
-  fi
-}
-list_files \
-  | grep -Ev "/($PRUNE_DIRS)/" \
+# NOT `list_files | grep ...`: the left side of a pipe runs in a subshell, and the skip counters
+# incremented there would be discarded — the caveats would silently vanish from `degraded`.
+list_files >"$TMP/raw.txt"
+grep -Ev "/($PRUNE_DIRS)/" "$TMP/raw.txt" \
   | { [ -n "$EXCLUDE_EXTRA" ] && grep -v -- "$EXCLUDE_EXTRA" || cat; } \
   | grep -Ev '\.(min\.js|lock|map|snap|png|jpg|jpeg|gif|svg|pdf|zip|gz|ico|woff2?|ttf)$' \
   > "$TMP/all.txt"
+
+FIDELITY_FORCED="$(skip_notes)"
+
+# "nothing scanned" and "nothing wrong" must never render the same. A clean report on an empty
+# file list is the single most dangerous output this script could produce.
+[ -s "$TMP/all.txt" ] || {
+  printf 'caps.sh: no files to scan under %s\n' "$ROOT" >&2
+  printf 'caps.sh: this is not a clean result — check --exclude, .gitignore and the path\n' >&2
+  exit 2; }
 
 pick() { grep -E "$1" "$TMP/all.txt" 2>/dev/null || true; }
 pick '\.py$'                       > "$TMP/python.txt"
@@ -88,38 +123,54 @@ pick '\.(ts|tsx|js|jsx|mjs|cjs)$'  > "$TMP/ts.txt"
 pick '\.(java|kt|kts)$'            > "$TMP/java.txt"
 pick '\.go$'                       > "$TMP/go.txt"
 
-# ---- file length applies to every text file, in every language ----
+# Every file we will judge on LENGTH: source in any language, first-class or not. Prose and data
+# are excluded on purpose — the 250-line cap is a claim about how much CODE one file may hold, and
+# firing it on a README or a fixture is a false finding that teaches a reader to ignore the tool.
+CODE_RE='\.(py|pyi|ts|tsx|js|jsx|mjs|cjs|java|kt|kts|go|rb|rs|c|h|cc|cpp|hpp|cs|swift|scala|php|ex|exs|erl|clj|dart|sh|bash|zsh|awk|pl|lua|m|mm|groovy|gradle|tf|vue|svelte)$'
+pick "$CODE_RE" > "$TMP/code.txt"
+
+# ---- file length: one loop over the code list, read per file so no ARG_MAX and no `file(1)` ----
+length_violation() {
+  printf '{"file":"%s","line":1,"metric":"file_lines","value":%s,"cap":%s,"severity":"%s","name":""}\n' \
+    "$1" "$2" "$3" "$4" >>"$VIOL"
+}
+# `lib/cap_pragma.py` attaches a pragma to the next DECLARATION below it, and a file has none — so
+# a file-level exemption is read from the header instead: `# codegraph:exempt file_lines -- <reason>`
+# in the first 20 lines. Same seam, same two conditions (name the metric, carry a reason), and the
+# breach is still emitted with severity `exempt` so the report says what it suppressed.
+head_exempts_length() {
+  head -n 20 -- "$1" 2>/dev/null | grep -Eq \
+    'codegraph:exempt[^-]*[[:space:],]file_lines([[:space:],][^-]*)?--[[:space:]]*[^[:space:]]'
+}
+classify_length() {
+  head_exempts_length "$2" && { length_violation "$1" "$3" "$CAP_FILE" exempt; return 0; }
+  [ "$3" -gt "$CAP_FILE" ] && { length_violation "$1" "$3" "$CAP_FILE" major; return 0; }
+  length_violation "$1" "$3" "$CAP_FILE_WARN" minor
+}
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   n=$(wc -l <"$f" | tr -d ' ')
-  rel="${f#"$ROOT"/}"
-  if [ "$n" -gt "$CAP_FILE" ]; then
-    printf '{"file":"%s","line":1,"metric":"file_lines","value":%s,"cap":%s,"severity":"major","name":""}\n' \
-      "$rel" "$n" "$CAP_FILE" >>"$VIOL"
-  elif [ "$n" -gt "$CAP_FILE_WARN" ]; then
-    printf '{"file":"%s","line":1,"metric":"file_lines","value":%s,"cap":%s,"severity":"minor","name":""}\n' \
-      "$rel" "$n" "$CAP_FILE_WARN" >>"$VIOL"
-  fi
-done < <(file --mime-type -- $(tr '\n' ' ' <"$TMP/all.txt" 2>/dev/null) 2>/dev/null \
-           | awk -F': ' '$2 ~ /^text\//{sub(/: [^:]*$/,"",$0); print $1}' 2>/dev/null \
-         || cat "$TMP/all.txt")
+  [ "$n" -gt "$CAP_FILE_WARN" ] || continue
+  classify_length "$(jstr "${f#"$ROOT"/}")" "$f" "$n"
+done <"$TMP/code.txt"
 
 # ---- python: exact, via the AST. No heuristic can match it, so prefer it hard. ----
-FIDELITY="native"
-if [ -s "$TMP/python.txt" ]; then
-  if command -v python3 >/dev/null 2>&1 && [ -f "$LIB/scan_python.py" ]; then
-    CG_CAP_METHOD="$CAP_METHOD" CG_CAP_METHOD_WARN="$CAP_METHOD_WARN" \
-    CG_CAP_NESTING="$CAP_NESTING" CG_CAP_LOOP_BODY="$CAP_LOOP_BODY" \
-    CG_CAP_PARAMS="$CAP_PARAMS" CG_CAP_PARAMS_WARN="$CAP_PARAMS_WARN" \
-    CG_CAP_PUBLIC="$CAP_PUBLIC" CG_CAP_PUBLIC_WARN="$CAP_PUBLIC_WARN" \
-    CG_ROOT="$ROOT" \
-      python3 "$LIB/scan_python.py" <"$TMP/python.txt" >>"$VIOL" 2>"$TMP/py.err" \
-      || { echo "python: scanner failed ($(tr -d '\n' <"$TMP/py.err" | tail -c 200))" >>"$DEGRADED"; FIDELITY="degraded"; }
-  else
+FIDELITY="${FIDELITY_FORCED:-native}"
+scan_python() {
+  [ -s "$TMP/python.txt" ] || return 0
+  command -v python3 >/dev/null 2>&1 && [ -f "$LIB/scan_python.py" ] || {
     echo "python: no python3 on PATH; python files counted for file length only" >>"$DEGRADED"
-    FIDELITY="degraded"
-  fi
-fi
+    FIDELITY="degraded"; return 0; }
+  CG_CAP_METHOD="$CAP_METHOD" CG_CAP_METHOD_WARN="$CAP_METHOD_WARN" \
+  CG_CAP_NESTING="$CAP_NESTING" CG_CAP_LOOP_BODY="$CAP_LOOP_BODY" \
+  CG_CAP_PARAMS="$CAP_PARAMS" CG_CAP_PARAMS_WARN="$CAP_PARAMS_WARN" \
+  CG_CAP_PUBLIC="$CAP_PUBLIC" CG_CAP_PUBLIC_WARN="$CAP_PUBLIC_WARN" \
+  CG_ROOT="$ROOT" \
+    python3 "$LIB/scan_python.py" <"$TMP/python.txt" >>"$VIOL" 2>"$TMP/py.err" || {
+      echo "python: scanner failed ($(tr -d '\n' <"$TMP/py.err" | tail -c 200))" >>"$DEGRADED"
+      FIDELITY="degraded"; }
+}
+scan_python
 
 # ---- brace languages: one awk scanner, dialect passed in ----
 scan_braces() {
@@ -128,12 +179,19 @@ scan_braces() {
   if [ ! -f "$LIB/scan_braces.awk" ]; then
     echo "$dialect: lib/scan_braces.awk missing; file length only" >>"$DEGRADED"; FIDELITY="degraded"; return 0
   fi
+  local rel
   while IFS= read -r f; do
     [ -f "$f" ] || continue
-    awk -v FNAME="${f#"$ROOT"/}" -v DIALECT="$dialect" \
+    # `awk -v` runs ESCAPE PROCESSING on the value, so a file literally named `a\nb.ts` would put a
+    # real newline inside FNAME and split the JSONL record in two. Double the backslashes and awk
+    # collapses them back to the literal ones. Without this, a filename is a JSON injection point.
+    rel="${f#"$ROOT"/}"
+    rel="${rel//\\/\\\\}"
+    awk -v FNAME="$rel" -v DIALECT="$dialect" \
         -v CAP_METHOD="$CAP_METHOD" -v CAP_METHOD_WARN="$CAP_METHOD_WARN" \
         -v CAP_NESTING="$CAP_NESTING" -v CAP_LOOP_BODY="$CAP_LOOP_BODY" \
         -v CAP_PARAMS="$CAP_PARAMS" -v CAP_PARAMS_WARN="$CAP_PARAMS_WARN" \
+        -v CAP_PUBLIC="$CAP_PUBLIC" -v CAP_PUBLIC_WARN="$CAP_PUBLIC_WARN" \
         -f "$LIB/scan_braces.awk" "$f" >>"$VIOL" 2>/dev/null
   done <"$list"
 }
@@ -142,63 +200,22 @@ scan_braces "$TMP/java.txt" "java"
 scan_braces "$TMP/go.txt"   "go"
 
 # ---- other languages get file length only; say so rather than implying a clean scan ----
-if [ -s "$TMP/all.txt" ]; then
-  others=$(grep -Ev '\.(py|ts|tsx|js|jsx|mjs|cjs|java|kt|kts|go|md|json|ya?ml|toml|txt|cfg|ini|sql|html|css|scss)$' "$TMP/all.txt" | wc -l | tr -d ' ')
-  [ "${others:-0}" -gt 0 ] && echo "$others files in unsupported languages: file length only" >>"$DEGRADED"
+# A code file in a language we have no scanner for is measured for LENGTH ONLY. Say the number, so
+# a reader can see how much of their repo the method/nesting/params findings actually cover.
+if [ -s "$TMP/code.txt" ]; then
+  others=$(grep -Ev '\.(py|pyi|ts|tsx|js|jsx|mjs|cjs|java|kt|kts|go)$' "$TMP/code.txt" | wc -l | tr -d ' ')
+  [ "${others:-0}" -gt 0 ] && echo "$others code files in languages without a scanner: file length only" >>"$DEGRADED"
 fi
 
-# ---- aggregate. awk, so no jq dependency. ----
-emit_json() {
-  printf '{\n'
-  printf '  "schema": "codegraph-caps/1",\n'
-  printf '  "root": "%s",\n' "$ROOT"
-  printf '  "fidelity": "%s",\n' "$FIDELITY"
-  printf '  "caps": {"file_lines": %s, "file_lines_warn": %s, "method_lines": %s, "method_lines_warn": %s, "nesting": %s, "loop_body": %s, "params": %s, "params_warn": %s, "public_members": %s, "public_members_warn": %s},\n' \
-    "$CAP_FILE" "$CAP_FILE_WARN" "$CAP_METHOD" "$CAP_METHOD_WARN" "$CAP_NESTING" \
-    "$CAP_LOOP_BODY" "$CAP_PARAMS" "$CAP_PARAMS_WARN" "$CAP_PUBLIC" "$CAP_PUBLIC_WARN"
-  printf '  "scanned": {"total": %s, "python": %s, "ts": %s, "java_kotlin": %s, "go": %s},\n' \
-    "$(wc -l <"$TMP/all.txt" | tr -d ' ')" "$(wc -l <"$TMP/python.txt" | tr -d ' ')" \
-    "$(wc -l <"$TMP/ts.txt" | tr -d ' ')" "$(wc -l <"$TMP/java.txt" | tr -d ' ')" \
-    "$(wc -l <"$TMP/go.txt" | tr -d ' ')"
-  printf '  "totals": {'
-  LC_ALL=C sort "$VIOL" -o "$VIOL" 2>/dev/null || true
-  awk '
-    match($0, /"metric":"[^"]+"/)   { m = substr($0, RSTART+10, RLENGTH-11) }
-    match($0, /"severity":"[^"]+"/) { s = substr($0, RSTART+12, RLENGTH-13) }
-    { c[m "_" s]++; keys[m "_" s] = 1; worst[m] = (worst[m] > 0 ? worst[m] : 0) }
-    match($0, /"value":[0-9]+/)     { v = substr($0, RSTART+8, RLENGTH-8) + 0
-                                      if (v > worst[m]) worst[m] = v }
-    END { n = 0
-          for (k in keys) { printf "%s\"%s\": %d", (n++ ? ", " : ""), k, c[k] }
-          for (k in worst) { printf "%s\"worst_%s\": %d", (n++ ? ", " : ""), k, worst[k] }
-        }' "$VIOL"
-  printf '},\n'
-  printf '  "degraded": ['
-  awk '{ gsub(/"/, "\\\""); printf "%s\"%s\"", (NR>1 ? ", " : ""), $0 }' "$DEGRADED"
-  printf '],\n'
-  printf '  "violations": [\n'
-  awk '{ printf "%s    %s", (NR>1 ? ",\n" : ""), $0 } END { if (NR) printf "\n" }' "$VIOL"
-  printf '  ]\n}\n'
-}
+# ---- a file the scanner could not read is a HOLE, not a clean result --------------------------
+# `unparseable` and `unbalanced_braces` are already emitted per file, but a count buried in
+# `totals` reads as one more minor. Fidelity is the field a gate looks at, so the fact that N files
+# were never measured for method-level caps has to land there and in `degraded` too.
+unreadable=$(grep -c '"metric":"\(unparseable\|unbalanced_braces\)"' "$VIOL" 2>/dev/null | tr -d ' ')
+if [ "${unreadable:-0}" -gt 0 ]; then
+  echo "$unreadable file(s) could not be parsed; they are counted for length only, not for method, nesting, params or public members" >>"$DEGRADED"
+  FIDELITY="degraded"
+fi
 
-emit_text() {
-  printf 'caps.sh %s  (fidelity: %s)\n\n' "$ROOT" "$FIDELITY"
-  awk 'match($0,/"metric":"[^"]+"/){m=substr($0,RSTART+10,RLENGTH-11)}
-       match($0,/"severity":"[^"]+"/){s=substr($0,RSTART+12,RLENGTH-13)}
-       {c[m" ("s")"]++} END{for(k in c) printf "%6d  %s\n", c[k], k}' "$VIOL" | LC_ALL=C sort -rn
-  printf '\nworst 20:\n'
-  LC_ALL=C sort -t: -k1,1 "$VIOL" | awk '
-    match($0,/"file":"[^"]*"/){f=substr($0,RSTART+8,RLENGTH-9)}
-    match($0,/"line":[0-9]+/){l=substr($0,RSTART+7,RLENGTH-7)}
-    match($0,/"metric":"[^"]+"/){m=substr($0,RSTART+10,RLENGTH-11)}
-    match($0,/"value":[0-9]+/){v=substr($0,RSTART+8,RLENGTH-8)}
-    {printf "%6d  %-18s %s:%s\n", v, m, f, l}' | LC_ALL=C sort -rn | head -20
-  [ -s "$DEGRADED" ] && { printf '\ndegraded:\n'; sed 's/^/  - /' "$DEGRADED"; }
-  return 0
-}
-
-case "$FORMAT" in
-  json) emit_json ;;
-  text) emit_text ;;
-esac
+render "$FORMAT"
 exit 0

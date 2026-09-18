@@ -20,9 +20,11 @@ Before spending a single agent, establish the ground truth. One `Bash` batch, on
    `pom.xml`/`build.gradle`, `go.mod`. Which linters already run, and **which caps they already
    enforce** — never report a violation of a cap the repo already polices differently without
    saying so.
-5. **Oracle inventory.** Write `.codegraph/oracle.json`: which of test suite, type checker,
-   linter, `caps.sh`, `graph.sh`, mutation tool actually run here. Dimensions with no oracle are
-   reported once as `UNVERIFIED` and never iterated on.
+5. **Oracle inventory.** Write `.codegraph/oracle.json` in the shape of `../specs/oracle.md`:
+   which of test suite, type checker, linter, `caps.sh`, `graph.sh`, mutation tool actually run
+   here, each with its **exact command**, whether it ran green, and its baseline output. Nine
+   later steps execute those strings verbatim, so the key names are a contract, not a suggestion.
+   Dimensions whose tool list is empty are reported once as `UNVERIFIED` and never iterated on.
 6. **Exclusions.** Vendored code, generated code, migrations, fixtures, `node_modules`, build
    output. List them; they go in the report's "does NOT cover" section.
 
@@ -41,7 +43,7 @@ Launch **all** dimension agents **in a single message** so they run concurrently
 
 | Dim | Agent | Reads | Hunts | Artifact |
 |---|---|---|---|---|
-| `graph` | `codegraph-cartographer` | `graph-tooling.md`, `graph-metrics.md` | cycles, hubs, fan-in/out, I/A/D, centrality, communities vs folders, layer violations | `graph.json` |
+| `graph` | `codegraph-cartographer` | `graph-tooling.md`, `graph-metrics.md` | cycles, hubs, fan-in/out, I/A/D, centrality, communities vs folders, layer violations | `graph.dim.json` |
 | `caps` | `codegraph-inspector` | `laws.md` | file lines, method lines (15 warn / 25 hard), nesting >1, loop bodies >8, `else`, params, public members, hierarchy depth | `caps.json` |
 | `cond` | `codegraph-inspector` | `doctrine.md` §1, `patterns.md` | every conflict C1–C14, with discriminant, branch count, and repeat sites | `cond.json` |
 | `di` | `codegraph-inspector` | `di-patterns.md` | Control Freak, Service Locator, Ambient Context, Bastard Injection, field injection, multiple roots, container-in-tests | `di.json` |
@@ -88,13 +90,20 @@ Verbatim requirements to include in each agent's prompt:
 ## Phase 1b — measure with the scripts, not by reading code
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/caps.sh  --json --root <path>  > .codegraph/caps.json
-bash ${CLAUDE_SKILL_DIR}/scripts/graph.sh --json --root <path>  > .codegraph/graph.raw.json
+bash <skill-dir>/scripts/caps.sh  --json --root <path>  > .codegraph/caps.json
+bash <skill-dir>/scripts/graph.sh --json --root <path>  > .codegraph/graph.raw.json
 ```
+
+`<skill-dir>` is the absolute path resolved in phase 0 and recorded in
+`.codegraph/oracle.json` (`tools.caps.command` / `tools.graph.command` are the exact
+strings). Substitute it; never run a command with an unexpanded `${...}` in it — a
+shell that does not set the variable silently runs `bash /skills/…`.
 
 Native tooling, per language, when installed — see `references/graph-tooling.md` for exact flags:
 `grimp`/`lint-imports`/`pydeps` · `depcruise --output-type json` · `jdeps -dotoutput` ·
-`go list -deps -json` · `git log --numstat` for churn and co-change.
+`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local go list -deps -json` ·
+`git log --numstat` for churn and co-change. The go prefix is not optional: without it the command
+resolves modules from the network.
 
 If native tooling is missing, the scripts fall back to a ripgrep import scan and set
 `"fidelity": "degraded"`. **Report the degradation in the verdict line.** A degraded graph may not
@@ -104,7 +113,8 @@ be used to claim "0 cycles."
 
 ## Phase 1c — merge and verify
 
-1. Merge every `<dim>.json` into `.codegraph/graph.json` per the schema in
+1. Merge every `<dim>.json` — including the cartographer's `graph.dim.json` — into
+   `.codegraph/graph.json` per the schema in
    `../specs/graph-report.md` §1. Sort every array by a stable key. Round floats to 3 decimals.
    Two runs on one commit must differ only in `generated_at`.
 2. **Verify the findings before writing the report.** Launch `codegraph-adversary` agents in
@@ -129,7 +139,11 @@ Two sections carry most of the value and are usually skipped by lesser reports:
   the threshold reason. This is what makes the spec reviewable: the reader can see what was
   considered and declined.
 - **Communities vs folders** — the detected module communities next to the folders that exist. The
-  mismatch list *is* the folder proposal that phase 2 turns into a target tree.
+  mismatch list *is* the folder proposal that phase 2 turns into a target tree. No bundled script
+  computes a partition, so with no native tool this section reads `community detection not run` and
+  the grouping comes from `nodes[].layer`/`nodes[].role` plus `edges[].legal`; name which. Printing
+  a fabricated community list or a `modularity Q` value is a blocker-severity error, because
+  `../references/graph-metrics.md` §9 then compares real folders against invented ones.
 
 Order findings: blockers → majors → minors (batched by file) → deferred-conflict inventory last
 under its own heading. Within a severity, descending `change-amplification × hotspot`.

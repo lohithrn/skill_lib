@@ -210,7 +210,9 @@ Tooling, verified surface:
   supports `containers`, `exhaustive`, `(optional)` layers, `a | b | c` for independent siblings
   and `a : b : c` for permissive; separators may not be mixed on one line. `*` = one module,
   `**` = subpackages.
-- **dependency-cruiser** (JS/TS): `npx depcruise --init`. Rules use `from`/`to` with
+- **dependency-cruiser** (JS/TS): `npx --no-install depcruise --init` — `--no-install` is not
+  optional, because plain `npx X` FETCHES `X` from the registry when it is absent, which breaks
+  the offline guarantee (see `graph-tooling.md` §1). Rules use `from`/`to` with
   `path`/`pathNot` — **regexes, not globs** — plus `circular`, `orphan`, `reachable`,
   `dependencyTypes`, `severity`. The `err` reporter's exit code equals the number of `error`
   violations, so it drops straight into CI. `--output-type baseline` + `--ignore-known` is the

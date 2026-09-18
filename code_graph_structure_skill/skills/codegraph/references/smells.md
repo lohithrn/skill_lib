@@ -11,7 +11,7 @@ that says "this feels messy" is noise. Every smell below maps to a CPRC move or 
 |---|---|---|
 | 1 | **Mysterious Name** | rename to the question it answers; ports named as questions |
 | 2 | **Duplicated Code** | Extract; if the copies differ in one dimension → that dimension is the conflict |
-| 3 | **Long Function** | hard limit 15 lines; extract, then promote the branch |
+| 3 | **Long Function** | warn 15 lines, hard 25 (`caps.sh` `method_lines_minor`/`_major`); extract, then promote the branch |
 | 4 | **Long Parameter List** | → **Context** value object (§6 of doctrine) |
 | 5 | **Global Data** | → inject via Context or constructor; Ambient Context anti-pattern |
 | 6 | **Mutable Data** | frozen Context, immutable value objects, CQS |
@@ -91,27 +91,36 @@ The five in **bold** under General plus F3/G15 are this skill's primary hunting 
 
 ## 3. Architecture smells — the graph-level catalog
 
-From Lippert & Roock, *Refactoring in Large Software Projects*, and Arcelli Fontana et al. /
-the Arcan tool. These are the smells the graph phase reports; they have no single-file location.
+These are the smells the graph phase reports; they have no single-file location. **The exact
+published rule, the numeric threshold, and the citation for every one of them is in
+`arch-smells.md` — read that file before reporting any of these.** The table below is the
+at-a-glance version and is not sufficient to write a finding, because a finding must state the
+variant and the number it used.
 
-| Smell | Detection rule | Resolution |
+| Smell | Rule, shortest defensible form | Resolution |
 |---|---|---|
-| **Cyclic Dependency** | any SCC of size ≥2 in the module graph (Tarjan) | invert the weaker edge behind a port (DIP), or extract a new component (ADP) |
-| **Hub-Like Dependency** | a node with both fan-in and fan-out above the 90th percentile | split by conflict; it is answering several questions |
-| **God Component** | LOC or class count ≫ median; high WMC and CBO | split by reason-to-change (CCP) |
-| **Unstable Dependency** | component depends on one with higher Instability *I* | reverse per SDP: depend in the direction of stability |
-| **Implicit Cross-module Dependency** | co-change coupling in git with no static edge | make the logical dependency physical (**G22**) |
-| **Ambiguous Interface** | one entry point taking a discriminator and dispatching internally | ★ textbook conflict — one port per question |
-| **Scattered Functionality** | one concern implemented across many unrelated modules | gather behind a port; usually a missing folder-level question |
-| **Feature Concentration** | one module implementing several unrelated concerns | opposite of the above; split |
-| **Dense Structure** | graph edge density far above expectation | usually a missing utils layer plus missing ports |
-| **Modularity Violation** | co-changing files in different modules | re-cut the module boundary (Louvain communities as a proposal) |
+| **Cyclic Dependency** | any SCC of size ≥2 in the module graph (Tarjan), then classified by *shape* | shape decides: cut one edge (circle) vs re-cut the boundary (clique) |
+| **Hub-Like Dependency** | `fanIn > median ∧ fanOut > median ∧ |fanIn−fanOut| ≤ total/4` (Arcan) | split by conflict; it is answering several questions |
+| **God Component** | > 30 classes or > 27,000 LOC (Designite/L&R), else > median package LOC | split by reason-to-change (CCP) |
+| **Unstable Dependency** | depends on a package with higher `I = Ce/(Ca+Ce)`; report at DoUD > 30% | reverse per SDP: depend in the direction of stability |
+| **Implicit Cross-module Dependency** | co-change > 2 across packages with no static edge | make the logical dependency physical (**G22**) |
+| **Unstable Interface** | ≥10 structural dependents that are also ≥10 of its co-change partners | ★ highest-impact smell in the literature — freeze the interface, split it |
+| **Crossing** | fan-in ≥4 **and** fan-out ≥4 **and** co-changes with both sides | ★ second-highest impact — the file is a pipe; extract the two halves |
+| **Ambiguous Interface** | one public method + ≥5 classes behind it, dispatching internally | ★ textbook conflict — one port per question |
+| **Scattered Functionality** | a method touching ≥2 external components, more than once | gather behind a port; usually a missing folder-level question |
+| **Feature Concentration** | `LCC = disconnected subgraphs / classes > 0.2` | opposite of the above; split |
+| **Dense Structure** | average degree `2|E|/|V| > 5` repo-wide (max one instance per repo) | usually a missing utils layer plus missing ports |
+| **Modularity Violation** | the *same* no-static-edge co-change pair recurring ≥2 (prefer ≥3) times | re-cut the module boundary (Louvain communities as a proposal) |
+| **Unhealthy Inheritance Hierarchy** | parent depends on a child, or a client depends on parent + children | LSP/DIP violation → sibling resolvers |
 | **Zone of Pain** | low Abstractness, low Instability (concrete + heavily depended on) | extract ports; add abstraction |
 | **Zone of Uselessness** | high Abstractness, high Instability (abstract + nothing uses it) | ★ delete it — this is Speculative Generality at component scale |
 
 **Lasagna Code** (too many delegation layers) and **Poltergeist** (a class that exists only to
 invoke another) are the over-application smells. Both are how *this doctrine* fails. Check for
 them in every verification pass.
+
+**Never report without a shape or a number.** "Cyclic dependency in `payments`" is unfalsifiable;
+"clique of 6 files in `payments` (BCKREF 0.83, DENSE 0.78)" is a work item.
 
 ---
 

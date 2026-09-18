@@ -40,7 +40,9 @@ Each numbered step in the slice's `Steps` list is **one commit**. Per step:
 2. **Copy, do not rewrite.** When extracting a resolver from `← file.py:100-115`, the body moves
    verbatim, including the quirks. Behaviour changes are a different slice, and the
    characterization tests from slice 1 exist precisely to catch a "harmless" cleanup.
-3. Run the oracle: the test suite, then `scripts/caps.sh` on the touched paths, then
+3. Run the oracle: the test suite, then `scripts/caps.sh --json --root <touched path>` (the path
+   is an option value, never a positional — a positional argument exits 2 and step 4 would read
+   that as red), then
    `scripts/graph.sh --cycles` if the step claims a graph change.
 4. Green ⇒ commit with the slice ID and step number in the subject. Red ⇒ **revert the step**
    (`git checkout -- .` for an uncommitted step), report the failure, and stop the slice.
@@ -63,7 +65,7 @@ Every file this job creates must pass `caps.sh` when it is written, not after a 
 | Writing | Rule |
 |---|---|
 | a port | ≤3 methods · docstring is the conflict **as a question** · no imports from resolvers |
-| a resolver | one file, one answer · takes the Context, nothing else · no `else` · nesting ≤2 |
+| a resolver | one file, one answer · takes the Context, nothing else · no `else` · nesting within `caps.sh`'s hard cap (default 1) |
 | the Absent resolver | returns the neutral value or raises the port's declared error type — never `None` bare |
 | a Context | frozen/immutable · no methods with logic · carries the unused headroom fields the spec named, with the comment the spec gave |
 | a registry | the one place a `match`/map over the discriminant is legal · exhaustive · Absent as default |

@@ -18,8 +18,9 @@ The orchestrator returns **≤ 25 lines** to the conversation. Bulk stays on dis
   "schema": "codegraph/1",
   "generated_at": "2026-09-17T00:00:00Z",
   "root": "/abs/path/to/repo",
-  "languages": [{"name": "python", "files": 412, "loc": 38104, "tooling": "grimp",
-                 "fidelity": "native"}],
+  // `files` AND `nodes`, because in Go they differ: one node is a package of several files.
+  "languages": [{"name": "python", "files": 412, "nodes": 412, "loc": 38104,
+                 "tooling": "ast", "fidelity": "native"}],
   "nodes": [
     {
       "id": "billing.invoice_service",       // module path, language-normalised
@@ -66,25 +67,60 @@ The orchestrator returns **≤ 25 lines** to the conversation. Bulk stays on dis
      "has_absent_resolver": false, "contract_suite": null,
      "imported_outside_root": ["reporting.summary"]}
   ],
+  "hub_like": [
+    {"node": "billing.util.helpers", "fan_in": 41, "fan_out": 38,
+     "median_fan_in": 3, "median_fan_out": 4,   // the thresholds it beat, so the claim is checkable
+     "ratio_ok": true}                          // |fan_in - fan_out| <= (fan_in + fan_out) / 4
+  ],
   "totals": {
+    "nodes": 412, "edges": 1204,
     "files": 412, "loc": 38104,
-    "files_over_250": 31,
-    "methods_over_15": 208, "methods_over_25": 74,   // warn count, hard count
-    "nesting_over_1": 96, "loop_bodies_over_8": 42, "else_count": 341,
+    "illegal_edges": 17,                        // edges with legal:false
+    "unresolved_imports": 88,                   // import targets no node matched
+    "utils": 9, "avg_degree": 5.8,
+    "ports_without_absent": 4,
+    // caps.sh keys are `<metric>_minor` (over target) and `<metric>_major` (over hard), plus
+    // `worst_<metric>`. Copy them verbatim: the name carries the severity, so a gate can assert
+    // `*_major == 0` without knowing which metrics exist. Never `files_over_250` — that spells a
+    // threshold into a key name, and CG_CAP_FILE is meant to move it.
+    "file_lines_minor": 31, "file_lines_major": 12, "worst_file_lines": 612,
+    "method_lines_minor": 208, "method_lines_major": 74, "worst_method_lines": 141,
+    "nesting_major": 96, "worst_nesting": 6,
+    "loop_body_major": 42, "worst_loop_body": 35,
+    "else_major": 341,
+    "params_minor": 30, "params_major": 9, "worst_params": 7,
+    "public_members_minor": 14, "public_members_major": 5, "worst_public_members": 19,
+    // Every caps key is `<metric>_<severity>`, with no exception for these three: the emitted
+    // spellings are `unparseable_minor`, `exempt_without_reason_major`, `unbalanced_braces_minor`.
+    // A gate keyed on the bare metric name reads "not measured" forever.
+    "unparseable_minor": 0, "exempt_without_reason_major": 0, "unbalanced_braces_minor": 0,
     "swallowed_exceptions": 12, "logs_without_stack": 38, "missing_timeouts": 5,
     "error_boundaries": 0, "orphan_resolvers_dead": 2, "banned_names": 7,
-    "cycles": 4, "propagation_cost": 0.19, "modularity_q": 0.42,
+    "cycles": 4, "propagation_cost": 0.19,   // propagation_cost is omitted above 3000 nodes
+    // "modularity_q" is RESERVED and emitted by nothing in this build (graph-metrics.md §9).
+    // Shown here only so a reader does not add it: a Q value no tool printed is a fabrication.
     "ports": 6, "resolvers": 14, "orphan_resolvers": 2,
     "composition_roots": 3, "container_uses_in_tests": 11,
     "contract_suites": 1, "ports_without_suite": 5
   },
-  "degraded": [{"language": "ruby", "reason": "no native tooling; regex import graph only"}]
+  // string[], not objects. One sentence per caveat, each naming what is missing from THIS run.
+  // A consumer indexing `entry["reason"]` raises TypeError, so do not document it as a shape.
+  "degraded": ["ruby: no native tooling; lexical import graph only",
+               "betweenness omitted: 1841 nodes > 1200-node cap"]
 }
 ```
 
 **Rules.** Every metric that appears must have been *measured* — no estimates, no
 "approximately". A metric a tool could not produce is **omitted**, not zeroed, and the reason
 goes in `degraded`. `legal` on an edge is computed from the layer rule, never guessed.
+
+`totals` is a **union across dimensions**, not one tool's output. `scripts/graph.sh --json`
+fills the structural keys; `scripts/caps.sh --json` fills the cap keys; the remaining
+dimensions fill theirs, and the orchestrator merges. So a key listed above being absent from
+any single tool's output is expected and correct — read the key you need, and treat a key that
+is missing entirely as *not measured*, never as zero. Consumers must key off names, never off
+position or count: this block is open, and a dimension added later adds keys here without any
+existing consumer changing.
 
 ---
 
@@ -109,8 +145,18 @@ reader can trust the absence.
 - ASCII adjacency by layer, ≤40 lines, deepest-first
 - cycles: every SCC listed with its weakest edge and the port that breaks it
 - top 5 by betweenness, top 5 by fan-in, top 5 by fan-out
+- illegal edges: **the top 5 source-folder → target-folder pairs, each with its count and its share
+  of `totals.illegal_edges`**, then the raw total. Never a per-edge list. On a repo that has not
+  been restructured yet, almost every cross-folder edge is sideways and therefore illegal
+  (`../references/doctrine.md` §9), so `3518 of 3593` is a **distance-to-target measurement, not
+  3518 findings** — say which folder pair carries the mass, because that is the first slice.
 - Instability/Abstractness scatter read: who is in the Zone of Pain, who in the Zone of Uselessness
-- communities detected vs folders that exist — the mismatch list IS the folder proposal
+- communities detected vs folders that exist — the mismatch list IS the folder proposal, **when a
+  partition was computed**. This build computes none (`../references/graph-metrics.md` §9:
+  `communities[]` and `totals.modularity_q` are reserved keys, not emitted), so unless a native
+  tool supplied a partition this section prints `community detection not run` and the folder
+  proposal is derived instead from `nodes[].layer`, `nodes[].role` and directory grouping, read
+  against `edges[].legal`. Never print a Q value that no tool produced.
 
 ## Hard limits
 | metric | warn | hard | worst | over warn | over hard | files |
@@ -153,20 +199,25 @@ resolvable, generated code skipped.
 
 ## 3. The ≤25-line conversation summary
 
-Exactly this shape. Nothing else enters the main context.
+Exactly this shape — including the *absent* renderings. Three numbers here are conditional and a
+run that does not have them must say so rather than print the example's value: `propagation cost`
+is omitted above the 3000-node cap (`propagation cost n/a (>3000 nodes)`), community detection is
+not computed at all (`community detection not run`), and `churn`/`hotspot` need the git pass in
+`../references/graph-tooling.md` §8 (`history not read`). Copying a number from this template is
+the failure `graph-report.md` §1 warns about: a missing key is *not measured*, never zero.
 
 ```
 CodeGraph: <repo> — ERODED. 3 blockers, 11 majors, 24 minors.
 
 Graph      412 files / 38.1k LOC / python+ts (native tooling)
-           4 cycles · propagation cost 0.19 · modularity Q 0.42
+           4 cycles · propagation cost 0.19 · community detection not run
            hub: billing.invoice_service (fan-in 7, fan-out 12, betweenness 0.081)
 Caps       31 files >250 · 74 methods >25 (208 >15) · 96 nests >1 · 42 loops >8 · 341 `else`
 Errors     12 swallowed · 38 logs without a stack · 5 missing timeouts · 0 error boundaries
 Ports      6 ports / 14 resolvers · 2 orphaned · 5 ports have no contract suite
 Roots      3 composition roots (expected 1) · 11 tests build via the container
 Dead       9 safe to delete · 4 suspicious (dynamic usage unresolved)
-Hotspot    src/billing/invoice_service.py (churn 34, hotspot 0.71)
+Hotspot    history not read (no git pass in this build; see graph-tooling.md §8 to run it)
 
 Top 3
 1  CG-GRAPH-001 blocker  billing↔reporting↔tax cycle — break at reporting→tax behind ReportsTax

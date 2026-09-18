@@ -70,9 +70,13 @@ subsection, or the subsection is rejected and re-requested:
 - the registration test that fails the build when a resolver is unregistered
 - **Deletes** — the exact ranges this port removes. A port that only adds is rejected.
 
-In parallel, launch one agent for the **target tree** (§2), reading `graph.json.communities`.
-The mismatch between detected communities and existing folders **is** the tree proposal; it is
-not invented. Every line marked `[new]` needs a one-line reason; every `[moved from]` needs a
+In parallel, launch one agent for the **target tree** (§2). Its input is `graph.json.communities`
+**when a partition exists** — this build does not compute one (`../references/graph-metrics.md` §9:
+reserved, not emitted), so unless a native tool supplied one, group by `nodes[].layer` and
+`nodes[].role`, then read `edges[].legal` and `cycles[]` to decide which group each node belongs
+in. Say `community detection not run` in the spec and name the grouping you used. Either way the
+mismatch between the grouping and the existing folders **is** the tree proposal; it is
+not invented, and a Q value no tool printed is never quoted. Every line marked `[new]` needs a one-line reason; every `[moved from]` needs a
 source; every `[deleted]` needs the finding ID that justifies it.
 
 ---

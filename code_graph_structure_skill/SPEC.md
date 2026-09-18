@@ -156,17 +156,25 @@ The request was "inheritance and polymorphism everywhere." Delivered as:
 
 Non-negotiable, machine-checked, reported per violation with file:line.
 
-| Limit | Value | Resolution when exceeded |
-|---|---|---|
-| File length | ≤ 250 lines | split by conflict; extract resolvers to `resolvers/` |
-| Method length | ≤ 15 lines | extract to a named private method or a util |
-| Nesting depth inside a method | ≤ 2 | invert to guard clause, or promote to a port |
-| `else` / `elif` branches | 0 | registry, chain, or Null Object |
-| Parameters per method | ≤ 3 (or 1 Context) | introduce Context |
-| Methods per port | ≤ 3 | split the port (ISP) |
-| Cycles in the module graph | 0 | invert the weaker edge behind a port |
-| Public members per class | ≤ 7 | split by reason-to-change |
-| Return points | guard clauses fine; ≤ 1 in the happy path | — |
+Two columns, and they are not interchangeable. **Target** is what a review asks for and what
+`caps.sh` reports as `*_minor`. **Hard** is what `caps.sh` reports as `*_major` and the only
+column a generated fitness test may assert — a test written against the target column fails
+code that is legal, and the ratchet stalls. The authority is `bash scripts/caps.sh --help`,
+which prints the live defaults; every number below is overridable by its `CG_CAP_*` env var, so
+read them rather than retyping them.
+
+| Limit | Target | Hard | Resolution when exceeded |
+|---|---|---|---|
+| File length | ≤ 200 lines | ≤ 250 | split by conflict; extract resolvers to `resolvers/` |
+| Method length | ≤ 15 lines | ≤ 25 | extract to a named private method or a util |
+| Nesting depth inside a method | ≤ 1 | ≤ 1 | invert to guard clause, or promote to a port |
+| Loop body length | ≤ 8 lines | ≤ 8 | extract the body to a named method |
+| `else` / `elif` branches | 0 | 0 | registry, chain, or Null Object |
+| Parameters per method | ≤ 3 (or 1 Context) | ≤ 4 | introduce Context |
+| Methods per port | ≤ 3 | ≤ 3 | split the port (ISP) |
+| Cycles in the module graph | 0 | 0 | invert the weaker edge behind a port |
+| Public members per class | ≤ 5 | ≤ 7 | split by reason-to-change |
+| Return points | ≤ 1 in the happy path | *not machine-checked* | review guideline; guard clauses exempt |
 
 `else` reaches zero because every conflict has a total resolver set including `Absent`. A
 `match`/`switch` used as a *registry literal* in the composition root is data, not control
@@ -195,7 +203,8 @@ code_graph_structure_skill/
     │   ├── spec.md               #   /codegraph spec
     │   ├── apply.md              #   /codegraph apply
     │   ├── verify.md             #   /codegraph verify
-    │   └── refine.md             #   the convergence loop
+    │   ├── fitness.md            #   /codegraph fitness — writes layer-4 tests only
+    │   └── refine.md             #   the convergence loop (a callee, never a route)
     ├── specs/                    # OUTPUT CONTRACTS — the port signatures
     │   ├── graph-report.md
     │   ├── restructure-spec.md
@@ -207,11 +216,21 @@ code_graph_structure_skill/
     │   ├── graph-metrics.md      #   formulas + thresholds
     │   ├── graph-tooling.md      #   exact commands, per language
     │   ├── smells.md             #   Fowler 24, Clean Code codes, architecture smells
+    │   ├── arch-smells.md        #   the published architecture smells + their exact numbers
+    │   ├── architecture.md       #   layering styles and the dependency rule
+    │   ├── patterns.md           #   the pattern catalogue, by conflict shape
+    │   ├── refactoring-moves.md  #   the mechanical move per finding
+    │   ├── language-idioms.md    #   the doctrine expressed per language
+    │   ├── naming.md             #   names as compressed structure
+    │   ├── error-handling.md     #   failure as a conflict, not an exception
+    │   ├── dead-code.md          #   reachability and orphan resolvers
     │   ├── testing-hierarchy.md  #   7 layers + contract-suite idioms
+    │   ├── testing-contracts.md  #   the contract-suite shape itself
     │   └── refine-loop.md        #   convergence + stopping criteria
     └── scripts/                  # deterministic checks — never read, only run
         ├── caps.sh               #   file/method/nesting/else caps, JSON out
-        └── graph.sh              #   module graph → JSON, per language
+        ├── graph.sh              #   module graph → JSON, per language
+        └── lib/                  #   the scanners and metric passes graph.sh routes to
 ```
 
 `SKILL.md` is a router only: it resolves the conflict "which job?" and delegates. It never
@@ -274,8 +293,8 @@ enters the orchestrator's context. That is the "summarized" requirement.
 
 ## 7. Finding contract
 
-Nothing counts as a finding unless it has all five fields. Borrowed shape: symptom → source →
-consequence → remedy, plus location.
+Nothing counts as a finding unless it has all seven fields. Borrowed shape: symptom → source →
+consequence → remedy, plus location, ID and severity.
 
 ```
 ID          CG-<dimension>-<n>
@@ -343,7 +362,14 @@ lines with bulk on disk. Same outcome, and fan-out survives. Add `context: fork`
 - [ ] `claude plugin validate . --strict` clean
 - [ ] `/codegraph` never fires without an explicit `/`
 - [ ] `SKILL.md` ≤ 250 lines and contains no job logic
-- [ ] every reference file ≤ 250 lines, cites its sources, imports no other reference
+- [ ] every reference file ≤ 600 lines, cites its sources, imports no other reference
+
+  The 250-line law in §3 is a **code** law, and the reason is in §3's own resolution column:
+  "split by conflict; extract resolvers". That resolution does not exist for prose — a reference is
+  loaded whole, cited by `§`, and splitting one catalogue across two files makes a model read two
+  files or miss half the rows. So prose gets its own cap, 600, enforced by
+  `tests/smoke.sh` rather than asserted here. Worst today: `references/patterns.md` at 542.
+  `SKILL.md` keeps the 250 cap because it is the router and is always in context.
 - [ ] `scripts/caps.sh` runs on this repo and on all four first-class languages
 - [ ] phase 2 gate provably blocks edits without an approved spec
 - [ ] every finding the skill emits carries all seven contract fields

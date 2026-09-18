@@ -75,7 +75,12 @@ for t in 0 .. budget-1:
 return best.spec                                    # BEST-of-passes, not the last pass
 ```
 
-Five stopping criteria, any one of which ends the loop. Design notes on each:
+**Six** `break` conditions above, in order — they are `jobs/refine.md`'s **S2** stop flag, **S3**
+rubric at max, **S4** plateau, **S5** no surviving finding, **S6** trivial diff, **S7** score
+regression. That list's **S1** (budget spent) is the `for` bound rather than a `break`, and its
+**S8** (a dimension ≥50% REFUTED) ends verification of one dimension from outside this loop, so
+eight named criteria and six breaks are the same thing counted at two levels. Dropping S7 is the
+expensive mistake: it is the accept-only-if-better guard. Design notes:
 
 - **Fresh dimension per pass.** Re-attacking the same dimension produces "everything looks good"
   — the documented failure where a self-critic approved 94% of instances. Rotation forces new
@@ -103,11 +108,12 @@ anchored by the original argument.
 Fixed return schema, no prose outside it:
 
 ```
-VERDICT     CONFIRMED | REFUTED | UNCLEAR
-LOCATION    the line the verdict actually applies to
-ATTACK      the specific reason it might be wrong
-CONSEQUENCE the concrete failure this finding predicts, or why no failure follows
-FIXABLE     yes | no | not-worth-it
+VERDICT      CONFIRMED | REFUTED | UNCLEAR
+LOCATION     the line the verdict actually applies to
+ATTACK       the specific reason the finding might be wrong
+EVIDENCE     the command that ran and the number it printed, or "none" — never a recollection
+CONSEQUENCE  the concrete failure this finding predicts, or why no failure follows
+FIXABLE      yes | no | not-worth-it
 ```
 
 **Asymmetric thresholds.** A finding needs **one** CONFIRMED to survive. It is dropped on **two

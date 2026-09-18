@@ -142,9 +142,18 @@ SEVERITY     deferred-conflict
 
 ```
 VERDICT      CONFIRMED | REFUTED | UNCLEAR
+LOCATION     the line the verdict actually applies to
 ATTACK       the specific reason the finding might be wrong
-COUNTER      why the attack fails, or why the finding is dropped
+EVIDENCE     the command that ran and the number it printed, or "none" — never a recollection
+CONSEQUENCE  the concrete failure this finding predicts, or why no failure follows
+FIXABLE      yes | no | not-worth-it
 ```
+
+This is the one wire format. `../references/refine-loop.md` §4 defines it; this block repeats it
+only because the adversary block is appended to a finding and a reader needs both shapes in one
+place. If they ever disagree, refine-loop.md §4 wins. `CONSEQUENCE` subsumes what an earlier
+draft called `COUNTER`: state the failure the finding predicts, or state that none follows —
+which is how a finding gets dropped. No prose outside these six lines.
 
 Survival: **1 CONFIRMED keeps it. 2 independent REFUTED drops it. 2 UNCLEAR downgrades it to
 minor.** The adversary never sees the finder's reasoning — only the finding and the code.
