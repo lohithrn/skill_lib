@@ -38,6 +38,25 @@ An unverified profile name is a guess.
 an exported variable means the call silently changes behaviour when the
 environment does, which is how a beta command lands in prod.
 
+### Two different Identity Center things — never conflate them
+
+Both are AWS IAM Identity Center, which is exactly why they get confused. They are
+different identities, for different people, bought with different values:
+
+| | Deploy identity | App login identity |
+|---|---|---|
+| **Who it authenticates** | you, or CI | the end user of the app |
+| **What it buys** | AWS CLI credentials to deploy | the app's "Login with AWS" button |
+| **Named by** | `SSO_START_URL`, `SSO_REGION`, `AWS_SSO_PROFILE` | `VITE_OIDC_CLIENT_ID`, `VITE_OIDC_ISSUER` |
+| **Set up by** | `md_create-git-template` scaffolding, then `md_upsert-aws-deployment-role` | `md_register-sso-app` |
+
+**A scaffolded repo gets the deploy half and not the login half.** No template declares a
+token for a client id or an issuer, so "the SSO values are substituted" never means login
+works — and an operator who says "SSO is already set up" may mean either one.
+
+When the operator says "SSO", establish which of the two they mean before acting. Guessing
+here produces a run that succeeds against the wrong thing.
+
 ## The deterministic engine
 
 **Each skill is a thin interactive layer over a deterministic engine.** The

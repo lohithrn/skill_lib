@@ -23,6 +23,11 @@ AWS-provisioning skills — then these non-negotiables:
   a flag. It authenticates in order to read an account id and nothing else. A scaffolder that also
   provisions IAM is a scaffolder nobody can run twice safely. If the user also needs a deploy role, that
   is a separate, confirmed run of the `md_upsert-aws-deployment-role` skill.
+- **This skill scaffolds the deploy identity, never the app's login identity.** `__SSO_START_URL__` and
+  `__SSO_REGION__` configure the AWS CLI login that pushes the repo. The end user's "Login with AWS"
+  needs `VITE_OIDC_CLIENT_ID` and `VITE_OIDC_ISSUER`, and **no template declares either** — those come
+  from `md_register-sso-app`. When the operator says "SSO is already set up", establish which of the two
+  they mean: `references/operating-doctrine.md` §Two different Identity Center things.
 - **Execute `assets/setup_new_repo.py` to scaffold.** Never recreate, simplify, rewrite or selectively
   copy its output by hand. It handles longest-token-first substitution, the executable bit, the
   `.tmpl` suffix strip and the fail-loud placeholder for anything unresolved. Hand-copying loses all

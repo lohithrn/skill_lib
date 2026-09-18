@@ -43,6 +43,10 @@ non-negotiables:
 - **Require an explicitly chosen named AWS profile.** Never ambient credentials, never `default`, and
   never create, rewrite or delete the profile you were given. Ambient credentials mean the role lands
   in whichever account the last tool left behind.
+- **Everything here is the deploy identity.** The role, the boundary and the CI user exist so you or CI
+  can push a repo; none of it touches the app's "Login with AWS", which is `md_register-sso-app` and its
+  `VITE_OIDC_*` values. Both sit in IAM Identity Center, which is why they get conflated:
+  `references/operating-doctrine.md` §Two different Identity Center things.
 
 ## Route
 

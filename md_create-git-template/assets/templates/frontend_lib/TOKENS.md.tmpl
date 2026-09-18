@@ -18,6 +18,13 @@ Every changing value in this skeleton is a `__TOKEN__`. Replace them all before 
 | `__GITHUB_ORG__` | GitHub org/owner (package.json repository URL). | `acme` |
 | `__GITHUB_REPO__` | GitHub repository name. | `SharedUiComponents` |
 
+**`__SSO_START_URL__` / `__SSO_REGION__` are the *deploy* identity — the AWS CLI login you or CI
+use to push this repo. They are not the app's login.** An end user's "Login with AWS" button
+needs `VITE_OIDC_CLIENT_ID` and `VITE_OIDC_ISSUER`, which **no template declares**: they come from a
+separate run of `/md_register-sso-app`. Substituting the two tokens above never makes login work.
+Full table: `md_create-git-template/references/operating-doctrine.md`
+§Two different Identity Center things.
+
 ## Two AWS identities (do not conflate)
 
 - **`temporary_aws_profile_name` = `${PROJECT_NAME}` (THROWAWAY).** Only a

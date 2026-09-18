@@ -34,6 +34,14 @@ AWS-provisioning skills — before the first AWS call, then these non-negotiable
 - **Never use Amazon Cognito.** See the constraint above. A Cognito "fallback"
   silently replaces the identity source the whole product authenticates against,
   and every user account already provisioned in Identity Center becomes invisible.
+- **What this skill produces is the app's login identity, not anyone's deploy
+  credentials.** `VITE_OIDC_CLIENT_ID` and `VITE_OIDC_ISSUER` authenticate the end
+  user; `SSO_START_URL` / `SSO_REGION` / `AWS_SSO_PROFILE` in a scaffolded repo are
+  a different Identity Center thing entirely — the developer's or CI's AWS CLI
+  login, set up by `md_create-git-template` and `md_upsert-aws-deployment-role`. So
+  "SSO is already set up" never means this skill has already run. Establish which
+  one the operator means before acting:
+  `references/operating-doctrine.md` §Two different Identity Center things.
 - **NEVER instruct the user to run a script or a shell command.** The user only
   answers questions. You run every file in `assets/` yourself, as a tool call. A
   skill that hands back a command line has done none of the work it exists for,

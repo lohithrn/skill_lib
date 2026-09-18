@@ -20,6 +20,13 @@ same name means the same thing everywhere.
 | `__GITHUB_ORG__` | GitHub organization owning the repo (metadata). | `Acme` |
 | `__GITHUB_REPO__` | GitHub repository name (metadata). | `TenantPublishService` |
 
+**`__SSO_START_URL__` / `__SSO_REGION__` are the *deploy* identity — the AWS CLI login you or CI
+use to push this repo. They are not the app's login.** An end user's "Login with AWS" button
+needs `VITE_OIDC_CLIENT_ID` and `VITE_OIDC_ISSUER`, which **no template declares**: they come from a
+separate run of `/md_register-sso-app`. Substituting the two tokens above never makes login work.
+Full table: `md_create-git-template/references/operating-doctrine.md`
+§Two different Identity Center things.
+
 ### Deliberately NOT tokenized
 
 - **`DOCKER_IMAGE` in `pipelines/azure-pipelines.yml`** (`docker.io/...`) — the

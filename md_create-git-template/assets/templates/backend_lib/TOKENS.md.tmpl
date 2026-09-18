@@ -16,6 +16,13 @@ Replace every token below on repo creation. Meaning + example, one per line.
 - `__GITHUB_ORG__` — GitHub org (setup.py `url`). Example: `acme`
 - `__GITHUB_REPO__` — GitHub repo name (setup.py `url`). Example: `MultiTenantClientAuthLib`
 
+**`__SSO_START_URL__` / `__SSO_REGION__` are the *deploy* identity — the AWS CLI login you or CI
+use to push this repo. They are not the app's login.** An end user's "Login with AWS" button
+needs `VITE_OIDC_CLIENT_ID` and `VITE_OIDC_ISSUER`, which **no template declares**: they come from a
+separate run of `/md_register-sso-app`. Substituting the two tokens above never makes login work.
+Full table: `md_create-git-template/references/operating-doctrine.md`
+§Two different Identity Center things.
+
 ## Three identities — do not conflate
 
 - **`temporary_aws_profile_name`** (= `${PROJECT_NAME}`) — THROWAWAY AWS CLI credentials pointer. The CLI forces `--profile`; this is created/deleted per run and its value may change run-to-run. CI assumes a role into it; local uses SSO into it. MUST NEVER name any persisted resource.
