@@ -2,6 +2,9 @@
 .claude/settings.local.json
 .claude/.headroom_wrap_marker.json
 
+# Local MCP tool state
+.serena/
+
 # Python bytecode from the measurement scripts
 __pycache__/
 *.py[cod]
