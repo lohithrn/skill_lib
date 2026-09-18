@@ -72,7 +72,9 @@ reason into `degraded[]`.
 | Tool | Command | Produces |
 |---|---|---|
 | **grimp** | `python3 -c "import grimp,json; g=grimp.build_graph('mypkg'); print(json.dumps({m: sorted(g.find_modules_directly_imported_by(m)) for m in sorted(g.modules)}))" > deps.json` | true module graph, relative imports resolved |
+| **grimp**, layer + cycle queries | `python3 -c "import grimp; g=grimp.build_graph('mypkg'); print(list(g.find_illegal_dependencies_for_layers(layers=('mypkg.web','mypkg.domain'))))"` | the illegal **routes** (heads, middle, tails), not a pass/fail. `g.nominate_cycle_breakers('mypkg')` returns an *approximate* minimum weighted feedback arc set — a suggestion, never a minimal cut (`graph-metrics.md` §3) |
 | **import-linter** | `lint-imports --config .importlinter` · verbose: `lint-imports -v` | pass/fail against declared layer contracts |
+| **pylint** | `pylint --output-format=json2 --disable=all --enable=cyclic-import mypkg` | one `R0401` per cycle, machine-readable (`json2` on recent pylint, `json` on older). The exit code is a **bitmask**, not a count: a cyclic-import breach is a refactor message, so `8` means "cycles found" and only `0` is clean |
 | **pydeps** | `pydeps mypkg --show-deps --noshow --max-bacon 0 > deps.json` | JSON adjacency. Flag names drift between versions — run `pydeps --help` first. `-o out.svg` needs Graphviz |
 | **bundled (default)** | `bash scripts/graph.sh --root . --json` | `stdlib ast` walk of `Import` / `ImportFrom`, relative levels resolved against the file's package |
 
@@ -98,6 +100,12 @@ exists; never author one as part of an analysis run.
 | **madge** | `npx --no-install madge --json src > deps.json` · cycles only: `npx --no-install madge --circular --extensions ts,tsx src` | adjacency; `--circular` exits non-zero when cycles exist |
 | **bundled** | `bash scripts/graph.sh --root . --json` | scans `import`/`export … from`/`require(...)` with literal specifiers |
 
+**`--ts-config` alone still understates a TS graph.** dependency-cruiser's
+`--ts-pre-compilation-deps` is **off by default** — checked in its own CLI option definition — and
+without it every `import type` and interface-only import is missing from the graph, so a codebase
+that leans on type-only imports comes back looking decoupled. Pass the flag, or record that
+type-only edges were not collected.
+
 **Fallback fidelity note:** the bundled scan does **not** read `tsconfig.json`, so `paths` aliases
 (`@app/*`), `baseUrl`, and monorepo workspace links resolve as unknown rather than as edges. It also
 cannot follow `require(variableName)` or `await import(`${dir}/x`)`. Both effects **understate**
@@ -115,7 +123,7 @@ say the alias edges are missing and give the alias count.
 | jdeps, package summary | `jdeps -summary build/classes/java/main` | package → package edges |
 | jdeps, DOT out | `jdeps -dotoutput out/ -verbose:package build/libs/app.jar` | `.dot` per archive, feed to Graphviz |
 | jdeps, keep intra-package | add `-filter:none` | otherwise same-package edges are dropped and cohesion looks perfect |
-| **ArchUnit** (a test, not a CLI) | `gradle --offline test --tests '*ArchTest*'` · `mvn -o test -Dtest=ArchitectureTest` | layer/cycle rule verification. `--offline` / `-o` are mandatory here. Prefer the SYSTEM `gradle` (`command -v gradle`) over `./gradlew`: the wrapper downloads the Gradle distribution named in the analysed repo's `gradle-wrapper.properties` **before** `--offline` is ever parsed, and `--offline` suppresses only *dependency* resolution. Running either also executes the target's build scripts, so this row belongs to apply/verify, never to read-only analysis |
+| **ArchUnit** (a test, not a CLI) | `gradle --offline test --tests '*ArchTest*'` · `mvn -o test -Dtest=ArchitectureTest` | layer/cycle rule verification, and **only** that: ArchUnit is assertion-only, exports no JSON, DOT or GraphML, and its PlantUML support is an *input* you hand-write — never plan to obtain a graph from it. `--offline` / `-o` are mandatory here. Prefer the SYSTEM `gradle` (`command -v gradle`) over `./gradlew`: the wrapper downloads the Gradle distribution named in the analysed repo's `gradle-wrapper.properties` **before** `--offline` is ever parsed, and `--offline` suppresses only *dependency* resolution. Running either also executes the target's build scripts, so this row belongs to apply/verify, never to read-only analysis |
 | **bundled** | `bash scripts/graph.sh --root . --json` | `package` + `import` declarations from source |
 
 **Fallback fidelity note:** the bundled scan reads source, not bytecode, so it misses everything the
@@ -252,3 +260,70 @@ Six fields. Missing any one makes the run unreviewable.
 | **unresolved** | `totals.unresolved_imports = 34`, with the reason (single-component tails, missing tsconfig paths, …) |
 | **caps hit** | contents of `degraded[]`, verbatim — betweenness skipped above 1200 nodes, closure above 3000 |
 | **history depth** | `git log --since='12 months ago'`, shallow: no/yes; or `history not read` |
+
+---
+
+## 11. Other graphs of the same repo — what each answers and what it costs
+
+The module graph is one projection of the code, not the code. Naming the others matters because
+almost every question people bring to a "code graph" is answered at the cheapest level, and moving
+up a level is a decision with a bill, not an upgrade.
+
+| Graph | Nodes → edges | Answers | Cost, offline |
+|---|---|---|---|
+| **module / import** (this build) | files, packages → `imports` | cycles, layering, god packages, unstable dependencies | minutes; an AST-lite scan is enough |
+| **call** | functions → `calls` | dead code, blast radius *inside* a module, broker functions | needs name resolution, and is unsound under dynamic dispatch (§9) |
+| **inheritance / type** | classes → `extends`, `implements` | deep, wide or cyclic hierarchies; LSP suspects | cheap from the same AST; not built here |
+| **PDG** (program dependence) | statements → data + control dependence | taint paths, and coupling through globals that no import reveals | a CFG plus reaching definitions per function — out of reach for a stdlib scan |
+| **code property graph** | AST nodes → AST ∪ CFG ∪ PDG joined on statement nodes | "does an argument reaching this sink depend on a check that does not dominate it", as one traversal | Joern, one language front-end per language — name it in `degraded`, never run it |
+| **ownership / co-change** | files, authors → `authored`, `changed-with` | knowledge silos, and coupling with no structural edge at all | `git log` only (§8) — the cheapest graph here and the one people skip |
+
+**CPG** is Yamaguchi, Golde, Arp & Rieck, "Modeling and Discovering Vulnerabilities with Code
+Property Graphs," IEEE S&P 2014; the contribution is the *join*, not the parsing. If a repo already
+has Joern on the box, its export representations are `Ast,Cfg,Ddg,Cdg,Pdg,Cpg14,Cpg,All` and its
+formats `Dot,Neo4jCsv,Graphml,Graphson` — enough to say in `degraded` that a better tool exists and
+what it would have produced. This skill installs nothing.
+
+**The call-graph precision ladder.** Pick a rung on purpose, because each costs more than the last
+and the top rungs need whole-program closure: naive name matching → **CHA** (class hierarchy
+analysis — every subtype of the declared receiver type) → **RTA** (rapid type analysis — CHA minus
+types never instantiated anywhere) → **VTA** (variable type analysis) → points-to. A CHA answer and
+a points-to answer disagree by design, so the rung is part of the result. Go's `callgraph` tool, when
+it is already on `PATH`, exposes `-algo=static|cha|rta`; its `pta` mode was removed, so an old
+command line fails rather than silently degrading.
+
+**Budget heuristic, offered as a heuristic:** the module graph answers roughly 90% of architecture
+questions at about 1% of the cost of a sound call graph. Those two figures are unattributed — no
+study is being cited — and they are here to set expectations, not to be quoted in a finding. Build a
+call graph when the question is blast radius *inside* a module; for cycles, layering and hubs the
+module graph is not an approximation of the answer, it is the answer.
+
+---
+
+## 12. Graph algorithms already on the box, and the caps that truncate a picture
+
+Graphviz is not only a layout engine — its CLI ships graph algorithms that answer questions
+`graph.sh` does not. All local, nothing installed, no network. Guard each one (`command -v tred`) and
+skip the whole section when Graphviz is absent.
+
+| Command | What it gives you |
+|---|---|
+| `tred graph.dot > reduced.dot` | transitive reduction — the edges a reader actually needs to see |
+| `tred -r graph.dot 2>&1 >/dev/null` | the **removed** edges, on stderr: that list *is* your redundant-dependency report. On a cyclic graph it also prints `warning: … has cycle(s), transitive reduction not unique` — heed it, the removed set is then one valid answer of several |
+| `sccmap -s graph.dot` | one line, `N nodes, M edges, K strong components` — a cycle count without writing a Tarjan |
+| `acyclic -n graph.dot` | no output; **exit 1 iff the graph has a cycle**. The cheapest gate here |
+| `ccomps -x graph.dot` | splits into weakly connected components, one graph each — finds the orphaned island |
+| `gvpr -f prog.gvpr graph.dot` | awk for graphs: filter or rewrite before layout |
+| `unflatten -l3 graph.dot` | tames a wide fan-out before `dot` lays it out |
+
+Behaviour above was checked against the Graphviz present in this environment. Engine choice: `dot`
+for dependency graphs, because its layers **are** a levelization; `sfdp` or `neato` past roughly a
+thousand nodes; `circo` when the cycle is the point.
+
+**Render caps truncate silently, which is worse than an ugly picture.** Mermaid's documented defaults
+are `maxTextSize` **50,000** characters and `maxEdges` **500**, and both sit in its `secure` array, so
+a document cannot raise them through front-matter or a directive — only a host calling
+`mermaid.initialize` can. Doxygen's `DOT_GRAPH_MAX_NODES` defaults to **50** and clips beyond it.
+Working line: Mermaid for ≤ 60 nodes and ≤ 150 edges inside a document, DOT or SVG for anything real,
+and when a graph is too large to draw, emit `graph.sh --text` instead. A truncated diagram with no
+note that it was truncated is a false clean report.

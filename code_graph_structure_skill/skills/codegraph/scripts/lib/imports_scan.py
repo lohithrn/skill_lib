@@ -74,14 +74,28 @@ def package_of(rel: str) -> list[str]:
 def absolute_head(node: ast.ImportFrom, pkg: list[str]) -> str:
     """The module a `from ... import` names, made absolute against the importing file's package.
 
-    Empty when a relative import climbs past the root: there is no target to record, so the
-    caller drops it rather than inventing one.
+    `node.level` is the dot count: level 1 is the file's own package, so the number of levels
+    CLIMBED is `level - 1`. `keep == 0` therefore means "landed exactly on the root", which is
+    legal and yields the bare module — it is not the error case.
+
+    Empty when the import climbs PAST the root, because there is no target to record and the
+    caller drops it. Returning the bare module there — which is what dropping the package prefix
+    while keeping `node.module` does — invents an absolute target out of a relative one:
+    `from ....far import y` would be recorded as a plain `far`, and if any node in the tree
+    happened to be called `far` the scan would report an edge that no import expresses. An
+    invented edge invents a cycle, and a cycle is a blocker.
+
+    KNOWN LIMITATION: `pkg` is relative to `--root`, so a legal deep climb in the real repo looks
+    like an over-climb when the scan is rooted at a subdirectory. Such an import is currently
+    dropped silently rather than counted in `unresolved_imports`, which understates that blind
+    spot. Dropping is still strictly better than the invented target it replaces.
     """
-    base = (node.module or "").split(".") if node.module else []
-    if node.level:
-        keep = len(pkg) - (node.level - 1)
-        base = (pkg[:keep] if keep > 0 else []) + base
-    return ".".join(p for p in base if p)
+    if not node.level:
+        return node.module or ""
+    keep = len(pkg) - (node.level - 1)
+    if keep < 0:
+        return ""
+    return ".".join(p for p in pkg[:keep] + (node.module or "").split(".") if p)
 
 
 def py_targets(tree: ast.AST, rel: str) -> tuple[list[str], list[str]]:

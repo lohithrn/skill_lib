@@ -723,6 +723,44 @@ if ("lib.alpha", "lib.beta") not in edges:
 PY
 }
 
+check_relative_imports_do_not_invent_absolute_targets() {
+  # `from ....far import y` written where only 2 package levels exist climbs PAST the root. Dropping
+  # the package prefix while keeping `node.module` recorded it as a plain `far`, so any node in the
+  # tree that happened to be called `far` acquired an edge no import expresses — an invented edge
+  # invents a cycle, and a cycle is a blocker.
+  #
+  # Both directions again, because the off-by-one is the whole difficulty. `node.level` is the DOT
+  # COUNT, so levels climbed is `level - 1`: `keep == 0` lands exactly ON the root and is LEGAL,
+  # only `keep < 0` is the error. A fix that refuses `keep <= 0` silences the false edge and takes
+  # a true one with it, and would pass the second assertion below while failing the first.
+  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  # shellcheck disable=SC2086
+  set -- $script
+  [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
+  local fx out
+  fx=$(mktemp -d)
+  mkdir -p "$fx/a/b"
+  printf 'y = 1\n'                        > "$fx/far.py"        # node id `far`, at the root
+  printf 'from ...far import y\nq = y\n'  > "$fx/a/b/atroot.py" # level 3, pkg a.b: keep==0, LEGAL
+  printf 'from ....far import y\nr = y\n' > "$fx/a/b/over.py"   # level 4: climbs above the root
+  out=$(bash "$1" --root "$fx" --json 2>/dev/null) || { rm -rf -- "$fx"; fail "graph.sh exited non-zero on the relative-import fixture"; return; }
+  rm -rf -- "$fx"
+  python3 - <<'PY' "$out" && pass "a relative import past the root invents no edge, one landing on it still resolves" \
+                          || fail "relative-import resolution is wrong (see stderr)"
+import json, sys
+d = json.loads(sys.argv[1])
+edges = {(e["from"], e["to"]) for e in d.get("edges", [])}
+if ("a.b.over", "far") in edges:
+    print(f"an import climbing PAST the root became an absolute target; edges={sorted(edges)}",
+          file=sys.stderr)
+    raise SystemExit(1)
+if ("a.b.atroot", "far") not in edges:
+    print(f"an import landing exactly ON the root (keep==0) is legal and must resolve; "
+          f"edges={sorted(edges)}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 check_graph_text_mode_runs() {
   local script="$ROOT"/*/skills/*/scripts/graph.sh
   # shellcheck disable=SC2086
@@ -935,6 +973,7 @@ check_caps_finds_known_violations
 check_graph_finds_known_cycle
 check_graph_cycles_mode_agrees_with_full
 check_graph_resolves_bare_sibling_imports
+check_relative_imports_do_not_invent_absolute_targets
 check_graph_text_mode_runs
 check_scripts_emit_valid_json
 check_scripts_are_read_only

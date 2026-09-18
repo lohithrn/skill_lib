@@ -11,7 +11,9 @@ not ship.** "Above median" means above the median of the repo in front of you. T
 literals allowed are the published ones marked below with a source.
 
 **Source markers:** `[P]` = quoted from the primary text · `[S]` = checked against a reliable
-secondary (vendor docs, tool source). No page numbers are given where the edition was not in hand.
+secondary (vendor docs, tool source) · `[derived]` = arithmetic on a cited number, not itself
+published · `[unverified]` = circulates widely, no primary source reached — never quote one bare.
+No page numbers are given where the edition was not in hand.
 
 **Computed column:** `yes → k` = `graph.sh` emits it under JSON key `k` · `reserved → k` = the key
 exists in `specs/graph-report.md` but the current build does not emit it, so report **"not
@@ -96,6 +98,17 @@ A cycle makes `depends(c)` identical for every member, so CCD explodes quadratic
 tangle: an SCC of size `k` contributes at least `k²`. That is why levelization is stated as
 "break cycles first, then measure."
 
+**Breaking a cycle: what is cheap and what is NP-hard.** Finding the cycles exactly is linear —
+Tarjan (1972) is one DFS at `O(|V|+|E|)` and emits SCCs in reverse topological order of the
+condensation `[P]`. Choosing the *fewest* edges to cut is not: minimum Feedback Arc Set is NP-hard
+(Karp 1972, one of the original 21; Garey & Johnson GT8) `[S]`, APX-hard with no constant-factor
+approximation under UGC, and the best known general ratio is `O(log n · log log n)` (Even, Naor,
+Schieber & Sudan, *Algorithmica* 20(2), 1998) `[S]`. So the division of labour is fixed: **report
+cycles exactly, propose cut edges heuristically, never call a cut minimal.** The cheap standard
+heuristic is Eades, Lin & Smyth's `GR` (*Inf. Process. Lett.* 47(6):319–323, 1993) `[S]` — `O(V+E)`,
+leaving at most `m/2 − n/6` back edges. Graphviz's `tred -r` answers the adjacent question offline
+(which edges are *redundant* rather than which are back edges) — `graph-tooling.md` §12.
+
 **Published bound.** ArchUnit's metrics documentation states verbatim `[P]`:
 
 > "for any non-trivial (n >= 5) acyclic graph of components the RACD is bound by 0.6"
@@ -129,6 +142,23 @@ Self-visibility is included, so the floor is `1/N`, not `0`.
 | `PC < 20%` | ordinary — where 70% of large open-source projects sit | MacCormack et al. 2006 `[P]` |
 | `PC ≥ 20%` | worse than 70% of that sample; report it with the sample size caveat | same |
 | `PC ≥ 50%` | half the system is downstream of a random file; a change cannot be reviewed locally | in-system reading, no published literal |
+
+**Reading `V` as more than one number — the core/periphery split.** The same closure gives every
+node a *visibility fan-in* `VFI` (how many files can reach it) and *visibility fan-out* `VFO` (how
+many it can reach). The hidden-structure method (Baldwin, MacCormack & Rusnak) sorts nodes on
+high/low `VFI × VFO` `[S]`:
+
+| Class | VFI | VFO | Reading |
+|---|---|---|---|
+| **Core** | high | high | the real architecture, whatever the folders say |
+| **Shared** | high | low | utilities, value types — reached by everything, reaches nothing |
+| **Control** | low | high | orchestrators, entry points, wiring |
+| **Peripheral** | low | low | leaves; the safe place to work |
+
+Every member of an SCC has **identical** `VFI` and `VFO` — reachability cannot tell nodes inside a
+cycle apart — so a large "core" is usually one tangle wearing many names. Report the SCC, not its
+members. The high/low split is a rank cutoff in the method, not a literal; state the one you used.
+Not computed: `graph.sh` emits no per-node visibility counts, only the aggregate below.
 
 **Computed:** yes → `totals.propagation_cost`, as a fraction (`0.0714`, not `7.14%`). Above 3000
 nodes the closure is skipped, the key is `null`, and the reason appears in `degraded[]` — the cost
@@ -179,11 +209,21 @@ Chidamber & Kemerer, "A Metrics Suite for Object Oriented Design," *IEEE TSE* 20
 - LCOM4 counts **only** intra-class edges. A class whose methods all delegate to one collaborator
   scores `1` and is still a Feature Envy case — that is a different smell, see `smells.md`.
 - Getter/setter-only pairs inflate cohesion. State whether accessors were included.
+- **The variant numbers collide.** LCOM3 is Li & Henry (1993) and LCOM4 is Hitz & Montazeri (1995),
+  but Henderson-Sellers calls *his own* formula "LCOM3" `[S]` — so a tool printing "LCOM3" almost
+  always means the `LCOM-HS` row above, not connected components. Tools that genuinely compute
+  connected components: Aivosto (`LCOM4`), jPeek (`hitz95`), and SonarQube's `lcom4`, since removed
+  as noise `[S]`. Read the tool's formula before comparing its number against this table.
 
 The rest of the C&K suite — **WMC** (sum of method complexities), **DIT** (inheritance depth from
 root), **NOC** (immediate children), **RFC** (methods plus methods invoked one level out) — are
 `reserved → nodes[].metrics.{wmc,dit,noc,rfc}` and not emitted. The published number worth keeping
 is `DIT > 6` for deep hierarchy, already tabulated in `arch-smells.md` §4.
+
+**Do not quote the class-level threshold table** usually attributed to Lanza & Marinescu
+(WMC 5/14/21, CBO 3/7/9). It circulates everywhere and no primary source for it could be reached
+`[unverified]`. Every vendor number with a traceable rule ID is in `arch-smells.md` §8; quote those
+instead.
 
 ---
 
@@ -222,6 +262,10 @@ question; on the forward graph it answers "what do I depend on," which is much l
 Say which direction you used. NDepend's TypeRank uses the same mean-1 normalisation `[S]`, so its
 numbers are comparable in shape to these.
 
+Centrality is also the published way to *order* findings: Arcan's Architectural Debt Index weights
+each smell by the PageRank of the node carrying it, `ASIS = SeverityScore × PageRank` `[S]`. That is
+the precedent for ranking by blast radius rather than by severity alone.
+
 Brandes (2001) gives betweenness in `O(V·E)` unweighted `[P]`; the 1200-node cap exists because the
 constant factor, not the asymptote, is what hurts. Freeman (1977) is the definition `[S]`.
 
@@ -248,9 +292,20 @@ is **never** a finding. Šubelj & Bajec's own prescription is to use detected co
 how `communities[].suggested_folder` must be read: as a proposal, attached to the folder it would
 move *within*.
 
+**Two consequences you act on.** (1) `√(2L)` is not abstract: at 20,000 dependency edges it is
+`√40000 = 200` files `[derived]` from the bound above, so on a large repo modularity maximisation
+will not propose *any* package smaller than that — which is why "modularity says merge these small
+folders" is never usable. Leiden's CPM objective with an explicit `γ` is the published way around the
+limit `[S]`. (2) MQ is a **sum**, not a mean: `CF_i = 2μ_i / (2μ_i + Σ_{j≠i}(ε_ij + ε_ji))` and
+`MQ = Σ_i CF_i`, so `0 ≤ MQ ≤ k` for `k` clusters (Mancoridis et al., IWPC 1998; Mitchell &
+Mancoridis, *IEEE TSE* 32(3), 2006) `[S]`. An MQ of 4 is not 400% of anything and is not comparable
+to a score produced under the earlier bounded-by-1 definition.
+
 The Bunch-family objectives (MQ, TurboMQ) have the mirror-image defect: Anquetil & Laval showed
 their cohesion and coupling terms move mechanically with system growth, so scores are not
-comparable across versions `[S]`. Do not report MQ as a trend.
+comparable across versions `[S]`. Their concrete case is the one to remember: across Eclipse
+2.0.1 → 3.1 normalised cohesion *and* coupling both fell while raw `Ce` **rose in about 80% of
+packages** `[S]`. Do not report MQ as a trend; trend raw `Ce` and SCC counts instead.
 
 **Computed:** no. `communities[]`, `communities[].modularity_contribution` and
 `totals.modularity_q` are `reserved` keys in `specs/graph-report.md`; the current `graph.sh` does
@@ -281,7 +336,12 @@ not emit them. Say "community detection not run" rather than eyeballing clusters
 | **mean = 1** | PageRank scale | `PR = 8` means 8× the average node | this skill (NDepend TypeRank uses the same) `[S]` |
 | **1200 nodes** | betweenness cap | Brandes `O(V·E)` with a large constant | this skill |
 | **0.50** | Gini of betweenness in a tangle | at or above → cycle shape `multi-hub` | this skill, over Al-Mutawa's shape taxonomy |
+| **`m/2 − n/6`** | feedback arc set | back edges the `GR` heuristic leaves; minimum FAS is NP-hard, so no cut you propose is minimal | Eades, Lin & Smyth 1993 `[S]` |
 | **√(2L)** | modularity | smaller communities are unresolvable | Fortunato & Barthélemy 2007 `[P]` |
+| **200 files** | modularity at 20,000 edges | the concrete reading of `√(2L)` — nothing smaller can be proposed | `[derived]` from Fortunato & Barthélemy 2007 |
+| **`0 ≤ MQ ≤ k`** | MQ / TurboMQ | a sum over `k` clusters, not comparable to the bounded-by-1 1998 form | Mitchell & Mancoridis 2006 `[S]` |
+| **~80%** | packages where raw `Ce` rose while normalised cohesion fell (Eclipse 2.0.1→3.1) | trend `Ce` and SCC counts, never normalised cohesion | Anquetil & Laval 2011 `[S]` |
+| WMC 5/14/21, CBO 3/7/9 | class thresholds attributed to Lanza & Marinescu | **do not quote** — no primary source reachable | `[unverified]` |
 | **0.09–0.33** | `Q` of real package structures | so low `Q` is **not** a finding | Šubelj & Bajec `[P]` |
 | **2** | co-change count | do **not** restate — the co-change, churn and hotspot thresholds live in `arch-smells.md` §5 and are cited from there | see `arch-smells.md` |
 
@@ -299,3 +359,4 @@ Say the missing input, not "unknown."
 | modularity `Q`, communities | a community-detection pass; `reserved` keys only | folder structure as declared, unjudged |
 | churn, hotspot, temporal coupling degree | `git log --numstat`; commands in `graph-tooling.md` §8 | run them, or say history was not read |
 | IFC / IF4 | a true `length` per node | an "IFC-shaped ranking" over `loc`, labelled as such |
+| VFI / VFO, core-periphery classes | per-node visibility counts; only the aggregate `propagation_cost` is emitted | derive them from the closure if it ran and state the rank cutoff, else say the classification was not computed |
