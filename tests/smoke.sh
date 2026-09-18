@@ -301,6 +301,37 @@ check_installer_installs_the_bundled_agents() {
   rm -rf -- "$sandbox"
 }
 
+check_installer_clone_path_installs() {
+  # The README's headline install is `curl … | bash`, which has no checkout and therefore always
+  # takes the clone path. That path was broken and no test saw it: `resolve_source` is read with
+  # `$( )`, so its progress line and `git reset --hard`'s "HEAD is now at …" were prepended to the
+  # source directory and every remote install died on "could not resolve a source tree". Cloning
+  # THIS repo over file:// exercises it without a network.
+  local sandbox branch out
+  sandbox=$(mktemp -d)
+  mkdir -p "$sandbox/bin" "$sandbox/cfg"
+  # install.sh alone, in a directory with no skills, is what forces the clone branch.
+  cp "$ROOT/install.sh" "$sandbox/bin/install.sh"
+  branch=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+  installer_clone_run "$sandbox" "$branch" install || {
+    rm -rf -- "$sandbox"; return; }
+  installer_clone_run "$sandbox" "$branch" update
+  rm -rf -- "$sandbox"
+}
+
+installer_clone_run() {
+  # Both runs assert the same thing — a skill arrived — because the first exercises `git clone`
+  # and the second `git fetch`/`reset --hard`, and only the second could regress on git's chatter.
+  local sandbox=$1 branch=$2 phase=$3 out flag=""
+  [ "$phase" = update ] && flag="--update"
+  out=$(CLAUDE_CONFIG_DIR="$sandbox/cfg" SKILL_LIB_REPO="file://$ROOT" \
+        SKILL_LIB_BRANCH="$branch" bash "$sandbox/bin/install.sh" $flag 2>&1) || {
+    fail "install.sh $phase from a clone failed: $(printf '%s' "$out" | tail -1)"; return 1; }
+  [ -f "$sandbox/cfg/skills"/*/SKILL.md ] 2>/dev/null \
+    && pass "install.sh installs from a fresh clone ($phase)" \
+    || { fail "install.sh $phase from a clone left no reachable SKILL.md"; return 1; }
+}
+
 # ----------------------------------------------------------------- WIRING ----
 
 check_documented_skill_paths_resolve() {
@@ -885,6 +916,7 @@ check_scripts_set_safe_flags
 check_installer_writes_nothing_on_dry_run
 check_installer_round_trip
 check_installer_installs_the_bundled_agents
+check_installer_clone_path_installs
 
 head2 "WIRING"
 check_plugin_manifest_targets_exist

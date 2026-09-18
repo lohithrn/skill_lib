@@ -37,9 +37,17 @@ FORCE_CLONE=0
 say()  { printf '%s\n' "$*"; }
 warn() { printf '%s\n' "$*" >&2; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+# `resolve_source` is read with `$( )`, so anything it prints to STDOUT becomes part of the path.
+# Progress from inside a command substitution therefore goes to stderr — otherwise "==> cloning …"
+# is prepended to the source directory and every clone/update install dies on `[ -d "$SRC" ]`.
+step() { printf '%s\n' "$*" >&2; }
+# Same trap, one level down: `git reset --hard` and `git pull` report on STDOUT ("HEAD is now
+# at …", "Fast-forward"), which lands in $SRC exactly like a progress line would. Every git call
+# made inside resolve_source goes through this, so no future git chatter can corrupt the path.
+git_step() { run "$@" >&2; }
 run()  {
   if [ "$DRY_RUN" -eq 1 ]; then
-    printf '  would: '; printf '%s ' "$@"; printf '\n'
+    { printf '  would: '; printf '%s ' "$@"; printf '\n'; } >&2
   else
     "$@"
   fi
@@ -103,14 +111,14 @@ sync_cache() {
     *) die "refusing non-https repo URL: $REPO_URL" ;;
   esac
   if [ -d "$CACHE_DIR/.git" ]; then
-    say "==> updating $CACHE_DIR"
-    run git -C "$CACHE_DIR" fetch --depth 1 origin "$REPO_BRANCH"
-    run git -C "$CACHE_DIR" checkout -q "$REPO_BRANCH"
-    run git -C "$CACHE_DIR" reset --hard "origin/$REPO_BRANCH"
+    step "==> updating $CACHE_DIR"
+    git_step git -C "$CACHE_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    git_step git -C "$CACHE_DIR" checkout -q "$REPO_BRANCH"
+    git_step git -C "$CACHE_DIR" reset --hard -q "origin/$REPO_BRANCH"
   else
-    say "==> cloning $REPO_URL into $CACHE_DIR"
-    run mkdir -p "$(dirname -- "$CACHE_DIR")"
-    run git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$CACHE_DIR"
+    step "==> cloning $REPO_URL into $CACHE_DIR"
+    git_step mkdir -p "$(dirname -- "$CACHE_DIR")"
+    git_step git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$CACHE_DIR"
   fi
   printf '%s' "$CACHE_DIR"
 }
@@ -122,8 +130,8 @@ resolve_source() {
     return 0
   fi
   if [ "$FORCE_CLONE" -eq 1 ] && here=$(script_dir) && [ -d "$here/.git" ] && has_skills "$here"; then
-    say "==> updating checkout $here"
-    run git -C "$here" pull --ff-only
+    step "==> updating checkout $here"
+    git_step git -C "$here" pull --ff-only -q
     printf '%s' "$here"
     return 0
   fi
@@ -184,6 +192,13 @@ fi
 # --- install ----------------------------------------------------------------
 
 SRC=$(resolve_source)
+# In dry-run the clone did not happen, so the cache path is a plan, not a directory. Reporting
+# "could not resolve a source tree" for a run that was told to change nothing is a false error.
+if [ "$DRY_RUN" -eq 1 ] && [ ! -d "$SRC" ]; then
+  say "dry run: would clone $REPO_URL ($REPO_BRANCH) into $SRC, then install from it"
+  say "dry run: nothing was changed"
+  exit 0
+fi
 [ -n "$SRC" ] && [ -d "$SRC" ] || die "could not resolve a source tree"
 has_skills "$SRC" || die "no skills found under $SRC (expected */skills/*/SKILL.md)"
 
