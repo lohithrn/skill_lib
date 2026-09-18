@@ -216,12 +216,16 @@ if [ "$ACTION" = list ]; then
   [ -d "$SKILLS_DIR" ] || { say "no skills installed ($SKILLS_DIR does not exist)"; exit 0; }
   found=0
   for d in "$SKILLS_DIR"/*; do
-    [ -e "$d" ] || continue
+    # Same reason as --uninstall: `-e` hides a dangling link, and a broken install is the one thing
+    # --list most needs to show. Name it "(broken)" so the fix is obvious from the output.
+    [ -e "$d" ] || [ -L "$d" ] || continue
     [ -f "$d/SKILL.md" ] || [ -L "$d" ] || continue
     case "$d" in *.backup.*) continue ;; esac
     found=1
-    if [ -L "$d" ]; then say "$(basename -- "$d")  ->  $(readlink -- "$d")"
-    else                  say "$(basename -- "$d")  (copy)"; fi
+    if [ -L "$d" ]; then
+      if [ -e "$d" ]; then say "$(basename -- "$d")  ->  $(readlink -- "$d")"
+      else                 say "$(basename -- "$d")  ->  $(readlink -- "$d")  (broken)"; fi
+    else say "$(basename -- "$d")  (copy)"; fi
   done
   [ "$found" -eq 1 ] || say "no skills installed in $SKILLS_DIR"
   for d in "$AGENTS_DIR"/*.md; do
@@ -243,7 +247,11 @@ if [ "$ACTION" = uninstall ]; then
   src=$(script_dir || true)
   removed=0
   for d in "$SKILLS_DIR"/*; do
-    [ -e "$d" ] || continue
+    # `-e` follows the link, so a DANGLING one is invisible to it — and a dangling link is exactly
+    # what renaming a skill in the checkout leaves behind, which is the case --uninstall exists to
+    # clean. Skipping it also lets the stale name shadow a later real install of the same skill.
+    # The agent and Codex loops below test `-L` for this reason; this loop has to as well.
+    [ -e "$d" ] || [ -L "$d" ] || continue
     name=$(basename -- "$d")
     if [ -L "$d" ]; then
       target=$(readlink -- "$d")

@@ -280,8 +280,18 @@ check_installer_round_trip() {
   else
     pass "install.sh installed $n skill(s), each with a reachable SKILL.md"
   fi
+  # A skill renamed in the checkout leaves a DANGLING link behind, and that is the case --uninstall
+  # exists to clean. The loop guarded on `-e`, which follows the link and so could not see it: the
+  # broken entry survived every uninstall and shadowed a later install of the same name. Plant one
+  # pointing into this checkout (the ours/theirs test only accepts that) and require it gone.
+  ln -s -- "$ROOT/md_this-skill-was-renamed-away" "$sandbox/cfg/skills/md_stale-name"
   CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
     bash "$ROOT/install.sh" --uninstall >/dev/null 2>&1
+  if [ -L "$sandbox/cfg/skills/md_stale-name" ]; then
+    fail "--uninstall left a dangling symlink it created behind"
+  else
+    pass "--uninstall removes a dangling symlink, not just a resolvable one"
+  fi
   if ls "$sandbox/cfg/skills"/* "$sandbox/cfg/agents"/* >/dev/null 2>&1; then
     fail "install.sh --uninstall left files behind"
   else
