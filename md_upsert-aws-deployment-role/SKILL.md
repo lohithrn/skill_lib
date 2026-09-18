@@ -20,9 +20,9 @@ Every path in this file is relative to this skill directory.
 
 ## The gate — read this first
 
-This skill writes to a **real AWS account**. Read `references/CROWBAR.md` — the
-plugin-level operating doctrine, a sibling of the `skills/` directory this skill lives in — before the
-first AWS call, then these non-negotiables:
+This skill writes to a **real AWS account**. Read `references/operating-doctrine.md` — the doctrine
+shared verbatim by the three AWS-provisioning skills — before the first AWS call, then these
+non-negotiables:
 
 - **Execute `assets/create_deployment_role.py` for provisioning.** Never replace it with hand-written
   AWS CLI calls, Terraform, an SDK, the console, or improvised IAM operations. The engine carries the

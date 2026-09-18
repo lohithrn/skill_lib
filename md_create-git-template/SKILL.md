@@ -16,8 +16,8 @@ Every path in this file is relative to this skill directory.
 
 ## The gate — read this first
 
-Read `references/CROWBAR.md` — the plugin-level operating doctrine, a sibling of
-the `skills/` directory this skill lives in — then these non-negotiables:
+Read `references/operating-doctrine.md` — the doctrine shared verbatim by the three
+AWS-provisioning skills — then these non-negotiables:
 
 - **This skill must not change AWS IAM.** No role, no policy, no user, no boundary, not once, not behind
   a flag. It authenticates in order to read an account id and nothing else. A scaffolder that also

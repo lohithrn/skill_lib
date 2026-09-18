@@ -1,9 +1,12 @@
-# Operating doctrine for both skills in this plugin
+# Operating doctrine for the three AWS-provisioning skills
 
-These rules apply to every run of `md_upsert-aws-deployment-role` and
-`md_create-git-template`. They are the doctrine both skills were written against;
-each rule states what breaks without it. Read this file before either skill's
-first AWS call.
+These rules apply to every run of `md_upsert-aws-deployment-role`,
+`md_create-git-template` and `md_register-sso-app`. They are the doctrine all
+three were written against; each rule states what breaks without it. Read this
+file before any of them makes its first AWS call.
+
+**This file is copied verbatim into all three skills** so each one still works
+from a checkout with no sibling installed. Change one copy and change all three.
 
 ## Credentials
 

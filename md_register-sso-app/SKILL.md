@@ -28,9 +28,8 @@ Every path in this file is relative to this skill directory.
 ## The gate — read this first
 
 This skill writes to a **real AWS account** and opens a browser. Read
-`references/CROWBAR.md` — the plugin-level operating
-doctrine, a sibling of the `skills/` directory this skill lives in — before the
-first AWS call, then these non-negotiables:
+`references/operating-doctrine.md` — the doctrine shared verbatim by the three
+AWS-provisioning skills — before the first AWS call, then these non-negotiables:
 
 - **Never use Amazon Cognito.** See the constraint above. A Cognito "fallback"
   silently replaces the identity source the whole product authenticates against,

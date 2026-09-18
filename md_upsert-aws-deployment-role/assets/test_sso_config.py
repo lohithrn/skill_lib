@@ -17,7 +17,7 @@ import sso_config as s
 def test_profile_name_is_sanitized_repo_name():
     assert s.profile_name_for_repo("webapp") == "webapp"
     assert s.profile_name_for_repo("World-Wide.Web") == "world-wide-web"
-    assert s.profile_name_for_repo("  ") == "crowbar-deploy"
+    assert s.profile_name_for_repo("  ") == "aws-deploy"
 
 
 def test_settings_taken_from_existing_profile_first():

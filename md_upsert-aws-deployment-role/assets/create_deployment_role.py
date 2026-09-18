@@ -656,7 +656,7 @@ def _run() -> None:
     answers = gather_inputs(args)
     user_regions = parse_regions(args.regions, DEFAULT_REGION) if args.regions else None
     out_dir = Path(args.out_dir).resolve() if args.out_dir else \
-        Path(tempfile.mkdtemp(prefix="crowbar-deploy-plan-"))
+        Path(tempfile.mkdtemp(prefix="aws-deploy-plan-"))
 
     # --- AUTHENTICATE FIRST so we always know which AWS account is targeted.
     # The SSO profile is derived from the repository name (a dedicated per-repo

@@ -44,7 +44,7 @@ class SsoSettings:
 def profile_name_for_repo(repo_name: str) -> str:
     """The dedicated per-repo profile name: the sanitized repo/folder name."""
     slug = re.sub(r"[^A-Za-z0-9_-]+", "-", repo_name).strip("-").lower()
-    return slug or "crowbar-deploy"
+    return slug or "aws-deploy"
 
 
 def discover_from_repo(repo_path: Path) -> SsoSettings:

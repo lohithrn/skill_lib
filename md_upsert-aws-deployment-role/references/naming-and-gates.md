@@ -103,6 +103,6 @@ foothold; making root opt-in is what keeps the escape hatch from becoming the no
 - **No engine replacement, no engine edit mid-run, no continuing past an engine error.**
 - **No certificate or keypair minted as an authorization mechanism.** IAM roles, an SSO login, and an
   explicitly requested CI access key are the only credentials in scope. See
-  `references/CROWBAR.md`.
+  `references/operating-doctrine.md`.
 - **No IAM changes from the sibling scaffolding skill.** If a scaffolded repo needs a deploy role, that
   is a separate, confirmed run of this one.

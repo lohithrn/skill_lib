@@ -111,7 +111,7 @@ def resolve_repo_source(source: str, branch: str = "", dest: Path | None = None)
         # Verify GitHub auth first — a private repo would otherwise fail the clone
         # with a confusing permission error.
         ensure_github_auth()
-        target = dest or Path(tempfile.mkdtemp(prefix="crowbar-deploy-repo-"))
+        target = dest or Path(tempfile.mkdtemp(prefix="aws-deploy-repo-"))
         if dest is None:
             _cloned_dirs.append(target)  # we own this temp dir; clean it up later
         clone_repo(source, target)
