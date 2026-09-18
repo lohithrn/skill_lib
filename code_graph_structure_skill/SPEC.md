@@ -337,7 +337,7 @@ stop flag, never prose.
 
 | Command | Effect |
 |---|---|
-| `/codegraph` | full pipeline on the repo, stopping at the phase-2 gate |
+| `/codegraph` | **the whole interface.** Resumes from `.codegraph/`: no spec ⇒ analyze + spec, stopping at the phase-2 gate; unchecked approval ⇒ re-print the gate; approved spec ⇒ the next unapplied slice; all applied ⇒ verify. Every token below is an override, never a requirement |
 | `/codegraph analyze [path]` | phases 0–1 only. Read-only. Never edits |
 | `/codegraph spec [path]` | phases 0–2. Read-only except `.codegraph/` |
 | `/codegraph verify` | phase 3 on an existing spec |

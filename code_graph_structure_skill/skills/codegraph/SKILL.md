@@ -3,7 +3,7 @@ name: codegraph
 description: Read a codebase as a dependency graph, then restructure it so every conflict becomes an interface, every interface has replaceable implementations wired at one composition root, and the folder tree IS the graph. Enforces hard caps (250-line files, 25-line methods, 1 nesting level, 8-line loop bodies, no else), responsibility-based file naming, traceback-bearing error handling, a contract-test suite per interface, and executable architecture-fitness tests.
 when_to_use: Only when explicitly invoked as /codegraph. Never auto-trigger.
 disable-model-invocation: true
-argument-hint: "[analyze|spec|verify|apply|fitness|review] [path]"
+argument-hint: "nothing — or [analyze|spec|verify|apply|fitness|review] [path] to force a phase"
 allowed-tools: Read, Grep, Glob, Write, Edit, TodoWrite, Agent, Bash(mkdir:*), Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git add:*), Bash(git commit:*), Bash(git checkout:*), Bash(git switch:*), Bash(git revert:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/codegraph/scripts/*), Bash(bash ${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
@@ -35,7 +35,7 @@ exception — two files, `analyze.md` then `spec.md`, in that order and never in
 
 | Invocation | Job file | Phases | Edits code? |
 |---|---|---|---|
-| `/codegraph` | `jobs/analyze.md` then `jobs/spec.md` | 0–2, stop at the gate | no |
+| `/codegraph` (no argument) | whatever `.codegraph/` says is next — see below | 0–5 as reached | only past an approved gate |
 | `/codegraph analyze [path]` | `jobs/analyze.md` | 0–1 | no |
 | `/codegraph review [path]` | `jobs/analyze.md` (findings only, no graph artifacts) | 0–1 | no |
 | `/codegraph spec [path]` | `jobs/spec.md` | 2 | no |
@@ -43,8 +43,11 @@ exception — two files, `analyze.md` then `spec.md`, in that order and never in
 | `/codegraph apply [slice\|all]` | `jobs/apply.md` | 4–5 | **yes, per approved slice** |
 | `/codegraph fitness [path]` | `jobs/fitness.md` | writes layer-4 tests only | adds tests |
 
-Unrecognised first token ⇒ treat the whole argument as a path; no arguments ⇒ the repo root. Either
-way, the default route.
+**No argument is the whole interface: bare `/codegraph` resumes.** Read `.codegraph/` first — no
+spec ⇒ analyze then spec · unchecked approval block ⇒ re-print the gate and stop · approved spec with
+slices left ⇒ apply the next one, naming it · all slices applied ⇒ verify. State which case was found
+and the job it selected in one line before starting. A job token overrides that choice; an
+unrecognised first token is a path, not an error.
 
 ---
 
