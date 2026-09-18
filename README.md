@@ -75,24 +75,30 @@ adding this repo with `/plugin marketplace add`, stop; run `install.sh` instead.
 
 ## Skills
 
-**19** skills, grouped by what they are for. Invoke any row by its name.
+**12** skills, grouped by what they are for. Invoke any row by its name.
 
-### Doctrine — the rules everything else defers to
+**The standing doctrine is not a skill.** The **three** contracts that outrank every project
+convention — judge code against the **system being built**, not the value in today's snapshot; never
+use a machine-generated certificate or private key as an authorization mechanism; and the output
+contract (lead with the command or path, number multi-step work, restate progress, concrete time
+estimates, cap lists at **5**, no preamble or closers) — belong in a global instruction file
+(`~/.claude/CLAUDE.md`, `~/AGENTS.md`) where they are always in context. A rule that only loads when a
+matcher fires is not a standing rule. The text to copy is
+`md_policy-code-review/references/standing-doctrine.md`, which is also where the review skill cites
+them from.
+
+### Conventions — the fleet's standing rules
 
 | Skill | What it does |
 | --- | --- |
-| `md_standing-doctrine` | The two rules that outrank every project convention: judge code against the **system being built**, not the value in today's snapshot; and never use a machine-generated certificate or private key as an authorization mechanism. |
-| `md_adhd-output-style` | The output contract — lead with the command or path, number multi-step work, restate progress, concrete time estimates, cap lists at **5**, no preamble or closers. Applies to reports, not just chat. |
-| `md_fleet-conventions` | The standing conventions for a fleet of services: `<prefix>_<resource_role>` naming, the AWS name-length caps and their slug escape hatches, route shape, `urls.{env}.yaml`, epoch-milliseconds, the deploy gates. |
-| `md_service-blueprint` | Builds a new service to those conventions, `naming.tf` first. |
+| `md_service-fleet-blueprint-conventions` | Two arcs over one fleet of services. **review:** the standing conventions — `<prefix>_<resource_role>` naming, the AWS name-length caps and their slug escape hatches, route shape, `urls.{env}.yaml`, epoch-milliseconds, the deploy gates — read a repo, rule on a diff, edit nothing. **build:** stands a new service up to those conventions, `naming.tf` first, from **5** bundled templates. Carries a **resource catalog** — one row per AWS resource kind with its terraform file, its `naming.tf` local, its cap, and whether a legacy repo is exempt — because every rule is marked `all code` or `new only`: existing services are grandfathered, never retrofitted. |
 
-### Review — read a tree, suggest, never edit
+### Review — read a tree, suggest, edit only in the one mode that says so
 
 | Skill | What it does |
 | --- | --- |
 | `md_codegraph` | Reads a codebase as a dependency graph, then restructures it so every conflict becomes an interface, every interface has replaceable implementations wired at a single composition root, and the folder tree is the graph. Explicit invocation only. Bundles **5** subagents. |
-| `md_policy-code-review` | Reviews a tree or a diff against the whole standing policy — graph structure, house conventions, and ordinary change review — and emits **suggestions only**. Has no write tools. |
-| `md_coding-rules` | The **40**-rule architecture, dependency-injection and maintainability standard, with a deterministic linter under `scripts/` whose JSON findings are treated as measured ground truth rather than re-eyeballed. |
+| `md_policy-code-review` | Reviews a tree or a diff against the whole standing policy at once — the **40**-rule architecture, dependency-injection and maintainability standard (group `R`), graph structure (`G`), house conventions (`H`), and ordinary change review (`C`) — with a deterministic linter under `scripts/` whose JSON findings are treated as measured ground truth rather than re-eyeballed. `review` and `diff` emit **suggestions only**; the one `refactor` mode applies them, and its gate is inspect-then-plan-then-edit. Holds the standing doctrine as `references/standing-doctrine.md` and cites it as precedence rules 1 and 2. |
 
 ### Build and provision
 
@@ -101,9 +107,7 @@ adding this repo with `/plugin marketplace add`, stop; run `install.sh` instead.
 | `md_upsert-aws-deployment-role` | Takes a local folder or a remote repository URL, reads its terraform, and provisions the IAM deployment role, inline policy and permissions boundary named after the repo. Ships the engine and its tests, not just the prompt. |
 | `md_register-sso-app` | Registers an OIDC login client in AWS IAM Identity Center and returns the client id and issuer for the frontend. **Never Cognito** — if Identity Center looks like it is missing a capability, keep investigating Identity Center. |
 | `md_create-git-template` | Scaffolds a new repository from the `frontend`, `frontend_lib`, `backend_service` and `backend_lib` templates — **61** template files including `naming.tf` itself. |
-| `md_library-scaffold` | Scaffolds and audits a shared Python library: `src/` layout, `setup.py`, the beta/prod publish split, the pipeline. |
-| `md_library-lifecycle` | The artifact lifecycle for such a library — build, upload, the resource manifest contract, runtime access. |
-| `md_library-migration` | Migrates callers off a library surface: measure both surfaces, group by destination, verify zero leftover imports. |
+| `md_python-library` | The whole life of an in-house **Python** library published as a wheel to S3, in three arcs: **scaffold** (`src/` layout, `setup.py`, the beta/prod publish split, the pipeline), **lifecycle** (build, upload, the baked resource-manifest contract, runtime access), **migration** (measure both surfaces, group by destination, prove zero leftover imports). The npm library path is `md_create-git-template`'s `frontend_lib` type instead. |
 | `md_hiatus-bedrock` | A spend circuit breaker for Bedrock usage on an AWS account. |
 | `md_mcp-skill-surface` | Exposes a REST/OpenAPI service as an MCP surface: tools generated 1:1 from operations, skills as prompts, documentation as resources. Its hardest rule is **a skill is not a tool** — a skill guides the client, tools execute. |
 
@@ -118,12 +122,11 @@ adding this repo with `/plugin marketplace add`, stop; run `install.sh` instead.
 | Skill | What it does |
 | --- | --- |
 | `md_director` | Interactive video generation: turns a brief into shots and drives the generator. Bundles **1** subagent. |
-| `md_talking-avatar` | Portrait to photoreal talking avatar over HLS — GPU bake, CPU replay, no request-time inference. |
 | `md_deck-builder` | Builds decks from your own PowerPoint template, with a QA gate that refuses to pass a deck it could not measure. |
 
 ## Layout
 
-The repo root holds **19** skill directories, the installer, this file, and the tests — nothing else:
+The repo root holds **12** skill directories, the installer, this file, and the tests — nothing else:
 
 ```
 skill_lib/
