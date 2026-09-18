@@ -49,11 +49,15 @@ git_safe() {
 # relative — would resolve against the CALLER's directory, so the tool would read a file outside
 # the tree it was asked about and report it as a finding of this repo. Skipped-and-declared beats
 # scanned-wrong: every refusal lands in `degraded`, so coverage is never overstated.
+#
+# The refusal covers EVERY C0 control character, not just the newline: `jstr` escapes `\`, `"` and
+# TAB, so a bare CR or ESC in a filename would travel into the JSON as a raw control byte and make
+# the whole document unparseable while the script still exits 0 — one `touch` denying every run.
 skipped_unsafe=0
 skipped_big=0
 emit_path() {
   local abs="$1"
-  case "$abs" in *"$NL"*) skipped_unsafe=$((skipped_unsafe + 1)); return 0 ;; esac
+  case "$abs" in *[[:cntrl:]]*) skipped_unsafe=$((skipped_unsafe + 1)); return 0 ;; esac
   [ -L "$abs" ] && return 0          # a symlink can point anywhere; -type f already skips these
   [ -f "$abs" ] || return 0
   if [ "$MAX_BYTES" -gt 0 ]; then
@@ -107,7 +111,7 @@ list_files() {
 skip_notes() {
   local forced=""
   if [ "$skipped_unsafe" -gt 0 ]; then
-    echo "$skipped_unsafe file(s) skipped: a newline in the filename cannot be carried safely" >>"$DEGRADED"
+    echo "$skipped_unsafe file(s) skipped: a newline or control character in the filename cannot be carried safely" >>"$DEGRADED"
     forced="degraded"
   fi
   if [ "$skipped_big" -gt 0 ]; then

@@ -13,8 +13,11 @@ Input: an approved `.codegraph/restructure.md`. Output: edited source, one commi
 Check, in this order, and stop at the first failure:
 
 1. `.codegraph/restructure.md` exists.
-2. Its sha matches `git rev-parse HEAD`. **A spec written against a different commit is void** —
-   line ranges have moved. Re-run `spec`.
+2. Its sha matches `git rev-parse HEAD`, **or** every commit since that sha is one
+   `.codegraph/applied.md` attributes to an earlier slice of this same spec. Anything else in
+   between means **the spec is void** — line ranges have moved under it. Re-run `spec`.
+   Not a formality: without the second clause `apply all` dies after slice 1, because slice 1's own
+   commits move HEAD off the sha the spec was written against.
 3. §9 Approval has **every box checked** and names slices.
 4. The requested slice is in that list. `/codegraph apply all` means the listed slices, in order —
    never every slice in the file.

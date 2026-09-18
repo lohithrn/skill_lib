@@ -477,6 +477,75 @@ PY
   fi
 }
 
+check_documented_graph_keys_have_the_documented_type() {
+  # Key spelling was already checked; the SHAPE was not. `specs/graph-report.md` documented
+  # `hub_like` as a list of objects with medians and a `ratio_ok` flag, while every build emits a
+  # plain `string[]` — so a consumer doing `h["node"]` raises TypeError, and a model that instead
+  # "fills in" median_fan_in has fabricated a number, which the skill calls a hard error. Spelling
+  # alone cannot catch that: only the real output, parsed, against the documented type.
+  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  # shellcheck disable=SC2086
+  set -- $script
+  [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
+  local fx out rc=0
+  fx=$(mktemp -d); mkdir -p "$fx/src"
+  # A hub needs fan-in AND fan-out above the medians, so the fixture is a small star with a middle.
+  printf 'import mid\n' > "$fx/src/one.py"
+  printf 'import mid\n' > "$fx/src/two.py"
+  printf 'import leaf_a\nimport leaf_b\nimport leaf_c\n' > "$fx/src/mid.py"
+  printf 'x = 1\n' > "$fx/src/leaf_a.py"
+  printf 'x = 2\n' > "$fx/src/leaf_b.py"
+  printf 'x = 3\n' > "$fx/src/leaf_c.py"
+  out=$(bash "$1" --root "$fx" --json 2>/dev/null) || rc=1
+  rm -rf -- "$fx"
+  [ "$rc" -eq 0 ] || { fail "graph.sh exited non-zero on the shape fixture"; return; }
+  printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+bad = []
+for key in ("hub_like", "degraded"):
+    v = d.get(key, [])
+    if not isinstance(v, list) or any(not isinstance(x, str) for x in v):
+        bad.append(f"{key} must be a list of strings, got {v!r}")
+for key in ("cycles", "ports", "nodes", "edges"):
+    v = d.get(key, [])
+    if not isinstance(v, list) or any(not isinstance(x, dict) for x in v):
+        bad.append(f"{key} must be a list of objects, got {type(v).__name__}")
+if not isinstance(d.get("fidelity"), str):
+    bad.append("fidelity must be a string")
+for line in bad:
+    print(line, file=sys.stderr)
+raise SystemExit(1 if bad else 0)
+' && pass "graph.json keys carry the type specs/graph-report.md documents" \
+  || fail "a graph.json key has a different type than its spec (see stderr)"
+}
+
+check_apply_gate_permits_multi_slice_progress() {
+  # The sha gate said "spec sha must equal HEAD, else void". Slice 1 commits, HEAD moves, slice 2 is
+  # declared void and the user is told to re-run `spec` — which rewrites the spec and voids the
+  # approval they just gave. `apply all` could never reach slice 2, and neither could the bare
+  # `/codegraph` resume that SKILL.md calls the whole interface. It failed CLOSED, so nothing was
+  # unsafe; the feature was simply unreachable. Doc-level check, because `apply` is model-driven.
+  local f="$ROOT"/*/skills/*/jobs/apply.md
+  # shellcheck disable=SC2086
+  set -- $f
+  [ -f "${1:-}" ] || { info "no apply.md to test"; return; }
+  if grep -q 'rev-parse HEAD' "$1" && grep -q 'applied.md' "$1" \
+     && python3 - "$1" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+i = text.find("rev-parse HEAD")
+window = text[i:i + 400] if i >= 0 else ""
+# The escape clause must sit in the sha check itself, not somewhere else in the file.
+raise SystemExit(0 if ("applied.md" in window and re.search(r"\bor\b", window)) else 1)
+PY
+  then
+    pass "the apply sha gate allows an earlier slice of the same spec to have moved HEAD"
+  else
+    fail "apply.md's sha gate voids the spec after slice 1, so multi-slice apply cannot run"
+  fi
+}
+
 check_plugin_manifest_targets_exist() {
   local bad=0 m
   for m in $(cd "$ROOT" && ls ./*/.claude-plugin/plugin.json 2>/dev/null); do
@@ -823,6 +892,92 @@ if ("a.b.atroot", "far") not in edges:
 PY
 }
 
+check_graph_degrades_when_a_file_was_not_read() {
+  # An unread file is a HOLE, and a hole hides the edge that would have closed a cycle. graph.sh
+  # used to report `fidelity: native`, `cycles: 0` over a repo with a plain a→c→a cycle because
+  # c.py would not parse: the tool said "exact measurement of an acyclic repo" about a repo it had
+  # half read. verify.md gate G8 then flips from FAIL to PASS when a slice BREAKS the syntax of a
+  # cycle partner, which turns the safety gate into a reward for the damage.
+  #
+  # Two causes, one verdict, because the word is what downstream reads: unparseable source, and a
+  # file emit_path refused. caps.sh already got this right, and that asymmetry is what hid it.
+  local script="$ROOT"/*/skills/*/scripts/graph.sh
+  # shellcheck disable=SC2086
+  set -- $script
+  [ -f "${1:-}" ] || { info "no graph.sh to test"; return; }
+  local fx rc=0 out
+  fx=$(mktemp -d); mkdir -p "$fx/src"
+  printf 'import c\nimport big\n' > "$fx/src/a.py"
+  printf 'import a\ndef f(:\n'    > "$fx/src/c.py"   # real cycle partner, unparseable
+  printf 'import a\n%s\n'         "$(head -c 400 </dev/zero | tr '\0' '#')" > "$fx/src/big.py"
+  # CG_MAX_FILE_BYTES makes the oversize case cheap: the cap is a knob precisely so the refusal
+  # can be provoked without writing a 5 MiB fixture.
+  out=$(CG_MAX_FILE_BYTES=200 bash "$1" --root "$fx" --json 2>/dev/null) || rc=1
+  rm -rf -- "$fx"
+  [ "$rc" -eq 0 ] || { fail "graph.sh exited non-zero on the partially-readable fixture"; return; }
+  printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+notes = " ".join(str(x) for x in (d.get("degraded") or []))
+if d.get("fidelity") == "native":
+    print("fidelity still claims native over a scan that skipped files", file=sys.stderr)
+    raise SystemExit(1)
+if "parse" not in notes or "CG_MAX_FILE_BYTES" not in notes:
+    print(f"both causes must be named in degraded; got: {notes!r}", file=sys.stderr)
+    raise SystemExit(1)
+' && pass "a graph that could not read every file reports fidelity=degraded" \
+  || fail "graph.sh overstated fidelity on an incomplete scan"
+}
+
+check_line_counts_are_exact() {
+  # Two off-by-ones that pointed opposite ways, on the two numbers a reader compares side by side.
+  # `wc -l` counts NEWLINES, so a 251-line file with no final newline measured 250 and landed as a
+  # `minor` under the 250 hard cap it actually breaches — fitness test F7 (`*_major == 0`) stays
+  # green on a file over the wall. `src.count("\n") + 1` went the other way and inflated every
+  # `loc` by one per file, so a 5 000-file repo published a total 5 000 lines too big.
+  local caps="$ROOT"/*/skills/*/scripts/caps.sh
+  local graph="$ROOT"/*/skills/*/scripts/graph.sh
+  # shellcheck disable=SC2086
+  set -- $caps $graph
+  [ -f "${1:-}" ] && [ -f "${2:-}" ] || { info "no scripts to test"; return; }
+  local fx
+  fx=$(mktemp -d); mkdir -p "$fx/src"
+  python3 - "$fx/src" <<'PY'
+import os, sys
+d = sys.argv[1]
+open(os.path.join(d, "ten.py"), "w").write("x = 1\n" * 10)          # exactly 10 lines
+open(os.path.join(d, "over.py"), "w").write("x = 1\n" * 250 + "x = 1")  # 251, no final newline
+PY
+  bash "$1" --root "$fx" --json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+worst = d.get("totals", {}).get("worst_file_lines")
+if worst != 251:
+    print(f"worst_file_lines should be 251 (no trailing newline), got {worst}", file=sys.stderr)
+    raise SystemExit(1)
+if d.get("totals", {}).get("file_lines_major", 0) != 1:
+    print("a 251-line file must be a major against the 250 hard cap", file=sys.stderr)
+    raise SystemExit(1)
+' && pass "caps.sh counts an unterminated last line, so the hard cap cannot be evaded" \
+  || fail "caps.sh miscounted file length"
+  bash "$2" --root "$fx" --json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+loc = {n["id"]: n["loc"] for n in d.get("nodes", [])}
+want = {"src.ten": 10, "src.over": 251}
+bad = {k: (loc.get(k), v) for k, v in want.items() if loc.get(k) != v}
+if bad:
+    print(f"loc is not the line count (got, want): {bad}", file=sys.stderr)
+    raise SystemExit(1)
+total = d.get("totals", {}).get("loc")
+if total != 261:
+    print(f"totals.loc should be 261, got {total}", file=sys.stderr)
+    raise SystemExit(1)
+' && pass "graph.sh loc equals caps.sh file_lines for the same file" \
+  || fail "graph.sh loc disagrees with the real line count"
+  rm -rf -- "$fx"
+}
+
 check_graph_text_mode_runs() {
   local script="$ROOT"/*/skills/*/scripts/graph.sh
   # shellcheck disable=SC2086
@@ -885,6 +1040,11 @@ for name in ("ok.py", "has space.py", "quo'te.py", "$(touch PWNED_SUBST).py",
              "esc\\nnot-a-newline.ts", "long.py"):
     open(os.path.join(d, name), "w").write(body)
 open(os.path.join(d, "real\nnewline.py"), "w").write(body)   # a REAL newline in the name
+# A bare CR is the newline's quieter twin: the newline check caught `\n` only, so `\r` travelled
+# into the JSON as a raw control byte and made the WHOLE document unparseable at exit 0 — one
+# `touch` denying every dimension of every run. Both must be refused, not just the one.
+open(os.path.join(d, "carriage\rreturn.py"), "w").write(body)
+open(os.path.join(d, "escape\x1bchar.ts"), "w").write(body)
 open(os.path.join(d, "long.py"), "w").write("x = 1\n" * 300)
 PY
   ln -s /etc/passwd "$d/src/leak.py"
@@ -1024,6 +1184,8 @@ head2 "WIRING"
 check_plugin_manifest_targets_exist
 check_documented_skill_paths_resolve
 check_documented_caps_keys_carry_a_severity
+check_documented_graph_keys_have_the_documented_type
+check_apply_gate_permits_multi_slice_progress
 check_reference_index_targets_exist
 check_every_file_is_reachable
 check_documented_flags_are_accepted
@@ -1038,6 +1200,8 @@ check_graph_finds_known_cycle
 check_graph_cycles_mode_agrees_with_full
 check_graph_resolves_bare_sibling_imports
 check_relative_imports_do_not_invent_absolute_targets
+check_graph_degrades_when_a_file_was_not_read
+check_line_counts_are_exact
 check_graph_text_mode_runs
 check_scripts_emit_valid_json
 check_scripts_are_read_only

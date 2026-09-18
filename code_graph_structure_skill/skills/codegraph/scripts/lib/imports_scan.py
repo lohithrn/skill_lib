@@ -142,9 +142,14 @@ def has_abstract_member(cls: ast.ClassDef) -> bool:
 
 
 def scan_text(rel: str, src: str, lang: str) -> dict:
-    """One record per non-Python file. The language is a lookup here, never a branch."""
+    """One record per non-Python file. The language is a lookup here, never a branch.
+
+    `loc` is `len(splitlines())`, not `count("\\n") + 1`: the latter reports 11 for a ten-line file
+    and would disagree with the `file_lines` number `caps.sh` prints for the same file, on every
+    file, in every total.
+    """
     facts = LEXERS.get(lang, imports_lexers.ABSENT).read(Source(rel, src))
-    return {"path": rel, "lang": lang, "loc": src.count("\n") + 1,
+    return {"path": rel, "lang": lang, "loc": len(src.splitlines()),
             "raw": sorted(set(facts.raw)), **facts.extra}
 
 
@@ -152,7 +157,7 @@ def scan_python(rel: str, src: str) -> dict:
     tree = ast.parse(src)
     total, abstract = py_types(tree)
     sure, maybe = py_targets(tree, rel)
-    return {"path": rel, "lang": "python", "loc": src.count("\n") + 1,
+    return {"path": rel, "lang": "python", "loc": len(src.splitlines()),
             "raw": sorted(set(sure)), "raw_maybe": sorted(set(maybe) - set(sure)),
             "id": dotted(rel), "types": total, "abstract": abstract}
 
@@ -167,8 +172,14 @@ def scan_file(path: str) -> None:
     try:
         rec = scan_python(rel, src) if lang == "python" else scan_text(rel, src, lang)
     except SyntaxError as e:
-        rec = {"path": rel, "lang": lang, "loc": src.count("\n") + 1, "raw": [],
+        # The id still comes from the path, so a file that would not parse stays in the SAME id
+        # namespace as its neighbours (`src.c`, not `src/c`) and an edge pointing at it is not a
+        # near-miss. `raw: []` means its own imports are missing — graph.sh counts this record and
+        # degrades `fidelity`, because the hole can hide a cycle.
+        rec = {"path": rel, "lang": lang, "loc": len(src.splitlines()), "raw": [],
                "unparseable": f"line {e.lineno}: {e.msg}"}
+        if lang == "python":
+            rec["id"] = dotted(rel)
     sys.stdout.write(json.dumps(rec, separators=(",", ":")) + "\n")
 
 

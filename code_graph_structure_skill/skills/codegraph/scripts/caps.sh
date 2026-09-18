@@ -149,7 +149,9 @@ classify_length() {
 }
 while IFS= read -r f; do
   [ -f "$f" ] || continue
-  n=$(wc -l <"$f" | tr -d ' ')
+  # NR, not `wc -l`: wc counts newlines, so a file with no final newline measures one line short
+  # and a 251-line file lands as a 250-line minor — under the 250 hard cap it actually breaches.
+  n=$(awk 'END{print NR+0}' <"$f")
   [ "$n" -gt "$CAP_FILE_WARN" ] || continue
   classify_length "$(jstr "${f#"$ROOT"/}")" "$f" "$n"
 done <"$TMP/code.txt"

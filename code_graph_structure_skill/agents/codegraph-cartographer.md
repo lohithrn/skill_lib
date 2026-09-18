@@ -26,8 +26,10 @@ You own exactly the keys `scripts/graph.sh --json` emits: `schema`, `generated_a
 `languages`, `fidelity`, `nodes`, `edges`, `cycles`, `ports`, `hub_like`, `degraded`, and the
 graph half of `totals` (`nodes`, `edges`, `cycles`, `illegal_edges`, `unresolved_imports`,
 `propagation_cost` when it was computed, `files`, `loc`). `ports` and `hub_like` are yours and are
-not optional: `jobs/verify.md` gate C3 reads `ports` and `specs/restructure-spec.md` §3 reads
-`hub_like`.
+not optional: `jobs/verify.md` gate C3 reads `ports`, and `hub_like` names the god-modules a slice
+is aimed at. `hub_like` is a **`string[]` of node ids** — not objects, so `entry["node"]` raises
+TypeError, and the medians it beat are not emitted; quote each id's own `fan_in`/`fan_out` from
+`nodes` rather than inventing the thresholds.
 
 `communities`, `layers` and `totals.modularity_q` are **reserved and not produced by this build**
 (`references/graph-metrics.md` §9). Leave them out. Do not hand-write them — an invented partition

@@ -67,11 +67,11 @@ The orchestrator returns **≤ 25 lines** to the conversation. Bulk stays on dis
      "has_absent_resolver": false, "contract_suite": null,
      "imported_outside_root": ["reporting.summary"]}
   ],
-  "hub_like": [
-    {"node": "billing.util.helpers", "fan_in": 41, "fan_out": 38,
-     "median_fan_in": 3, "median_fan_out": 4,   // the thresholds it beat, so the claim is checkable
-     "ratio_ok": true}                          // |fan_in - fan_out| <= (fan_in + fan_out) / 4
-  ],
+  // string[] of node ids, NOT objects. The medians it beat and the |fan_in - fan_out| <=
+  // (fan_in + fan_out) / 4 balance test are computed inside graph_build.hub_like() and not
+  // emitted; a consumer indexing entry["node"] raises TypeError, and a model that fills in
+  // "median_fan_in" has fabricated a number. Read each id's own fan_in/fan_out from `nodes`.
+  "hub_like": ["billing.util.helpers"],
   "totals": {
     "nodes": 412, "edges": 1204,
     "files": 412, "loc": 38104,

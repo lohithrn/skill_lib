@@ -105,7 +105,8 @@ Native tooling, per language, when installed — see `references/graph-tooling.m
 `git log --numstat` for churn and co-change. The go prefix is not optional: without it the command
 resolves modules from the network.
 
-If native tooling is missing, the scripts fall back to a ripgrep import scan and set
+If native tooling is missing, the scripts fall back to a lexical import sweep (`grep`/`awk`, no
+extra tooling — ripgrep is not a dependency and is never installed) and set
 `"fidelity": "degraded"`. **Report the degradation in the verdict line.** A degraded graph may not
 be used to claim "0 cycles."
 
