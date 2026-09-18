@@ -126,13 +126,15 @@ them from.
 
 ## Layout
 
-The repo root holds **12** skill directories, the installer, this file, and the tests — nothing else:
+The repo root holds **12** skill directories, the installer, this file, the license and the tests —
+nothing else:
 
 ```
 skill_lib/
   md_<name>/       # one skill; the directory name IS the skill name and the slash command
   install.sh       # the only install path — links or copies each md_*/ into ~/.claude
   README.md
+  LICENSE
   tests/smoke.sh   # the test suite
 ```
 
@@ -194,4 +196,4 @@ Copy the one `md_<name>/` directory into `~/.claude/skills/` (user-level) or `.c
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
