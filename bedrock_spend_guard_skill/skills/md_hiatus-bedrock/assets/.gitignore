@@ -1,0 +1,5 @@
+# run.sh builds these inside this directory at run time. Neither is ever committed:
+# the venv is machine-specific and rebuilt on demand, and the credential directory
+# must not exist in a public repo even empty.
+.venv/
+.aws_hiatus_bedrock/

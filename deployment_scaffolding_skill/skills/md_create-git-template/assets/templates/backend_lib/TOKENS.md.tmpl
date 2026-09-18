@@ -1,0 +1,23 @@
+# Tokens — backend_lib template
+
+Replace every token below on repo creation. Meaning + example, one per line.
+
+- `__PROJECT_NAME__` — logical repo/project name. Also the value of the THROWAWAY CLI profile `temporary_aws_profile_name`. Example: `MultiTenantClientAuthLib`
+- `__PACKAGE_NAME__` — Python package/import name (top-level dir under `src/`). Example: `multi_tenant_auth`
+- `__TENANT_NAME__` — tenant/branding ONLY (venv name, labels). NEVER used to name persisted resources. Also the ADO variable-group name. Example: `acme`
+- `__DEPLOYMENT_TENANT_PROFILE__` — PERSISTED-resource identity (`deployment_tenant_profile`); the stable owner of the published S3 buckets. NO DEFAULT — scripts fail loudly if empty. Example: `acme`
+- `__AWS_ACCOUNT_ID__` — 12-digit AWS account id (deployment role + SSO account). Example: `<account-id>`
+- `__SSO_START_URL__` — AWS SSO start URL (local deploy). Example: `<sso-start-url>`
+- `__SSO_REGION__` — region of the IAM Identity Center portal. Example: `us-west-1`
+- `__DEPLOY_REGION_BETA__` — AWS region for beta deploys/buckets. Example: `us-west-2`
+- `__DEPLOY_REGION_PROD__` — AWS region for prod deploys/buckets. Example: `us-west-1`
+- `__PACKAGE_S3_BUCKET_BETA__` — S3 bucket the wheel is published to (beta); persisted, owned by `deployment_tenant_profile`. Example: `acme-clientauthlib-beta`
+- `__PACKAGE_S3_BUCKET_PROD__` — S3 bucket the wheel is published to (prod); persisted, owned by `deployment_tenant_profile`. Example: `acme-clientauthlib-prod`
+- `__GITHUB_ORG__` — GitHub org (setup.py `url`). Example: `acme`
+- `__GITHUB_REPO__` — GitHub repo name (setup.py `url`). Example: `MultiTenantClientAuthLib`
+
+## Three identities — do not conflate
+
+- **`temporary_aws_profile_name`** (= `${PROJECT_NAME}`) — THROWAWAY AWS CLI credentials pointer. The CLI forces `--profile`; this is created/deleted per run and its value may change run-to-run. CI assumes a role into it; local uses SSO into it. MUST NEVER name any persisted resource.
+- **`deployment_tenant_profile`** (`__DEPLOYMENT_TENANT_PROFILE__`) — PERSISTED-resource identity. Stable; owns the published S3 buckets. NO silent default: if referenced empty, scripts print to stderr and `exit 1`.
+- **`TENANT_NAME`** (`__TENANT_NAME__`) — BRANDING ONLY (venv name, labels). Never names persisted resources.

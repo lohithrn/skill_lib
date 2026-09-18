@@ -1,0 +1,48 @@
+# frontend_lib template tokens
+
+Every changing value in this skeleton is a `__TOKEN__`. Replace them all before use.
+
+| Token | Meaning | Example |
+|-------|---------|---------|
+| `__PROJECT_NAME__` | Logical repo/project name. Also the THROWAWAY CLI profile name (`temporary_aws_profile_name=${PROJECT_NAME}`) and the local SSO profile name. | `SharedUiComponents` |
+| `__PACKAGE_NAME__` | The npm package name (`name` in package.json). May be scoped. | `@acme/shared-ui` |
+| `__TENANT_NAME__` | Tenant / **branding only** (ADO variable group, dotenv). NEVER names a persisted resource. | `acme` |
+| `__DEPLOYMENT_TENANT_PROFILE__` | **Persisted-resource identity.** Stable name that owns persisted resources (the S3 publish buckets). NO DEFAULT — scripts fail loudly if empty/unreplaced. Never derived from the throwaway profile or any changing value. | `acme` |
+| `__AWS_ACCOUNT_ID__` | 12-digit AWS account id the artifact publishes into (beta account default). | `<account-id>` |
+| `__SSO_START_URL__` | AWS IAM Identity Center (SSO) start URL for local publishing. | `<sso-start-url>` |
+| `__SSO_REGION__` | Region of the SSO / Identity Center portal. | `us-east-1` |
+| `__DEPLOY_REGION_BETA__` | AWS region for the beta publish + bucket. | `us-west-2` |
+| `__DEPLOY_REGION_PROD__` | AWS region for the prod publish + bucket. | `us-west-1` |
+| `__PACKAGE_S3_BUCKET_BETA__` | Public-read S3 bucket the beta tarball is published to. | `acme-shared-ui-beta` |
+| `__PACKAGE_S3_BUCKET_PROD__` | Public-read S3 bucket the prod tarball is published to. | `acme-shared-ui-prod` |
+| `__GITHUB_ORG__` | GitHub org/owner (package.json repository URL). | `acme` |
+| `__GITHUB_REPO__` | GitHub repository name. | `SharedUiComponents` |
+
+## Two AWS identities (do not conflate)
+
+- **`temporary_aws_profile_name` = `${PROJECT_NAME}` (THROWAWAY).** Only a
+  credentials pointer — the AWS CLI forces `--profile`. Created/deleted, value
+  may change run-to-run. CI assumes the deploy role and writes the session into
+  it; local SSO writes into it. It MUST NEVER name any persisted resource.
+- **`deployment_tenant_profile` = `__DEPLOYMENT_TENANT_PROFILE__` (PERSISTED).**
+  The stable identity that owns persisted resources (the publish buckets). It has
+  **no default**; `require_deployment_tenant_profile` (in `infra/utils.sh`) exits
+  1 on stderr if it is empty or still the placeholder token. The bucket names
+  themselves stay the explicit `__PACKAGE_S3_BUCKET_{BETA,PROD}__` tokens.
+
+## CI secrets (set in the pipeline / variable group, not tokenized here)
+
+These are read by `z_build_and_publish_*.sh` from the environment; the pipeline
+maps them from the ADO variable group. They are the static base keys used to
+assume the deploy role in CI:
+
+- `FRONTEND_LIB_BETA_AWS_ACCESS_KEY` / `FRONTEND_LIB_BETA_AWS_SECRET_KEY`
+- `FRONTEND_LIB_PROD_AWS_ACCESS_KEY` / `FRONTEND_LIB_PROD_AWS_SECRET_KEY`
+
+## Optional runtime overrides (env, no edit required)
+
+- `DEPLOY_ROLE_ARN` / `DEPLOY_ROLE_NAME` / `DEPLOY_ACCOUNT_ID` — override the
+  assume-role target in CI.
+- `AWS_SSO_PROFILE`, `SSO_START_URL`, `SSO_REGION`, `EXPECTED_ACCOUNT`,
+  `DEPLOY_REGION` — override the local SSO publish (`z_deploy_beta_from_local.sh`).
+- `NODE_VERSION` — Node version for nvm (default 18).

@@ -1,0 +1,59 @@
+#!/bin/bash
+set -x
+set -e
+set -o pipefail
+
+# ─── Identity model (TWO separate identities, intentionally distinct) ───
+# PROFILE                    : the LOGIN / SSO SOURCE profile — HOW we authenticate.
+#                              Folder name locally (via PARAM_PROFILE_NAME); in CI
+#                              the static base creds are the assume-role source.
+# temporary_aws_profile_name : the THROWAWAY CLI profile the assumed-role session
+#                              is WRITTEN INTO and that terraform + the aws CLI use.
+#                              Value = ${PROJECT_NAME}. A credentials pointer ONLY
+#                              (AWS CLI forces --profile); NEVER names a resource.
+# deployment_tenant_profile  : the PERSISTED-RESOURCE identity — names the terraform
+#                              state bucket AND the suffix on every resource name.
+#                              NO DEFAULT: unset ⇒ deploy() fails loudly.
+export PROJECT_NAME="$(basename "$PWD")"
+export PROFILE="${PARAM_PROFILE_NAME:-$PROJECT_NAME}"
+export ENVIRONMENT="beta"
+export REGION=${4:-"__DEPLOY_REGION_BETA__"}
+
+# Throwaway CLI profile: value = project name, the profile terraform uses. The
+# assumed-role session is written into it; may change run-to-run; never persisted.
+export temporary_aws_profile_name="${PROJECT_NAME}"
+export AWS_PROFILE="${temporary_aws_profile_name}"
+
+# Persisted-resource identity. Names the shared terraform state bucket AND the
+# lowercased suffix on every terraform resource name. NO silent fallback — if the
+# scaffolding token was not substituted this stays literally "__DEPLOYMENT_TENANT_PROFILE__"
+# and deploy() aborts; substitute it at repo creation. Flows only through deploy_utils.sh.
+export deployment_tenant_profile="${deployment_tenant_profile:-__DEPLOYMENT_TENANT_PROFILE__}"
+
+# Source the utility functions + auth helpers.
+source infra/deploy_utils.sh
+source infra/provider_login.sh
+
+# Authenticate. In CI the two vars carry static base creds and we assume the
+# backend deploy role (writing the session into temporary_aws_profile_name);
+# locally they are empty and we reuse the SSO session that
+# z_deploy_beta_from_local.sh established. Rename the CI secret vars to match your
+# secret store if needed.
+login_with_assume_role "$BETA_BACKEND_AWS_ACCESS_KEY" "$BETA_BACKEND_AWS_SECRET_KEY"
+
+# Final gate before any AWS mutation: confirm the resolved credentials land in the
+# account this environment is configured to deploy into (single source of truth:
+# infra/aws_account_config.sh).
+assert_aws_account "$temporary_aws_profile_name" "$ENVIRONMENT"
+
+# Run the deployment. Evaluate its status (ultimately terraform apply's exit
+# code) EXPLICITLY and make it this script's exit status, so a failed apply can
+# never be reported as a successful deploy — even if a later/trailing step runs.
+deploy "$temporary_aws_profile_name" "$ENVIRONMENT" "$REGION"
+deploy_status=$?
+if [ "$deploy_status" -ne 0 ]; then
+    echo "BETA deploy FAILED (terraform apply exit ${deploy_status})." >&2
+    exit "$deploy_status"
+fi
+echo "BETA deploy succeeded."
+exit 0

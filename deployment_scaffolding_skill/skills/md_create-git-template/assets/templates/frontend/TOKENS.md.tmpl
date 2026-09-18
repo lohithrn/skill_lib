@@ -1,0 +1,28 @@
+# Template tokens — frontend
+
+Every token below is a literal placeholder the scaffolding tool must substitute
+when it materializes a new repo from this template. One token per line:
+`__TOKEN__` — meaning — example value.
+
+__PROJECT_NAME__ — logical repo/project name (also the deployed service/folder name; the AWS profile + terraform state key derive from the folder name at runtime) — my-web-app
+__TENANT_NAME__ — tenant / branding, lowercase; DISPLAY ONLY (VITE_TENANT, default source-credential profile name). Must NOT name any persisted resource — use __DEPLOYMENT_TENANT_PROFILE__ for that — acme
+__DEPLOYMENT_TENANT_PROFILE__ — PERSISTED-RESOURCE IDENTITY. Stable value that names persisted resources: the terraform state bucket (terraform-<env>-<deployment_tenant_profile>-state) and resource suffixes. Decoupled from the throwaway CLI profile (=PROJECT_NAME) and from tenant_name. NO default — deploy fails loudly if empty/unset — acme
+__TENANT_NAME_UPPER__ — uppercase form of __TENANT_NAME__; used only where a literal identifier is required and cannot be shell-derived: the Azure DevOps variable group name and the CI secret env-var name prefix (e.g. ACME_BETA_FRONTEND_AWS_ACCESS_KEY) — ACME
+__AWS_ACCOUNT_ID__ — 12-digit AWS account id the site deploys into (EXPECTED_ACCOUNT for the local SSO flow) — <account-id>
+__SSO_START_URL__ — AWS IAM Identity Center (SSO) start URL for local deploys — <sso-start-url>
+__SSO_REGION__ — region of the SSO / IAM Identity Center portal — us-east-1
+__DEPLOY_REGION_BETA__ — AWS region the beta site is deployed to — us-west-2
+__DEPLOY_REGION_PROD__ — AWS region the prod site is deployed to — us-west-1
+__DOMAIN_NAME__ — apex domain hosting the site (subdomains derived in-shell: www.<domain>, <env>.<domain>, www.<env>.<domain>) — example.com
+__CERTIFICATE_ARN_BETA__ — ACM certificate ARN (us-east-1, for CloudFront) covering the beta hostnames — arn:aws:acm:us-east-1:<account-id>:certificate/xxxxxxxx-beta
+__CERTIFICATE_ARN_PROD__ — ACM certificate ARN (us-east-1, for CloudFront) covering the prod hostnames — arn:aws:acm:us-east-1:<account-id>:certificate/xxxxxxxx-prod
+
+## No safe default (fail-loud)
+
+Every token above MUST be substituted before the repo will deploy correctly.
+The following has an explicit runtime fail-loud guard in addition to being a
+placeholder — it will never silently fall back to another identity:
+
+- `__DEPLOYMENT_TENANT_PROFILE__` — resolves to the `deployment_tenant_profile`
+  shell var; if left empty/unset the deploy scripts and `deploy_terraform` echo
+  an error to stderr and `exit 1` BEFORE any AWS action.

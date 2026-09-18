@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Single source of truth for project-wide constants.
+# All shell scripts MUST source this file instead of redeclaring these values.
+#
+# THREE DISTINCT IDENTITIES — do not conflate them:
+#
+#   1. temporary_aws_profile_name (THROWAWAY) = ${PROJECT_NAME}
+#      The AWS CLI credentials pointer (the CLI forces --profile). Created and
+#      deleted per run; its value may change run-to-run. CI assumes a role into
+#      it; local SSO logs into it. MUST NEVER name any persisted resource.
+#
+#   2. deployment_tenant_profile (PERSISTED IDENTITY) = __DEPLOYMENT_TENANT_PROFILE__
+#      The stable identity that OWNS persisted resources (the published S3
+#      buckets). NO DEFAULT — if empty, scripts FAIL LOUDLY (never derive a
+#      persisted name from the throwaway profile or any changing value).
+#
+#   3. TENANT_NAME (BRANDING ONLY) — labels + venv name. NEVER used to name
+#      persisted resources.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Identity / branding
+export TENANT_NAME="__TENANT_NAME__"          # branding only (venv name, labels)
+export PROJECT_NAME="__PROJECT_NAME__"
+export PACKAGE_NAME="__PACKAGE_NAME__"          # python import name (dir under src/)
+
+# THROWAWAY CLI profile — credentials pointer only. Never names persisted things.
+export temporary_aws_profile_name="${PROJECT_NAME}"
+export AWS_PROFILE="${temporary_aws_profile_name}"
+
+# PERSISTED-RESOURCE IDENTITY — stable; the only identity allowed to own/name
+# persisted resources. NO DEFAULT.
+export deployment_tenant_profile="__DEPLOYMENT_TENANT_PROFILE__"
+
+# Fail loudly if the persisted identity is missing. Call before touching any
+# persisted resource. There is intentionally NO fallback value.
+require_deployment_tenant_profile() {
+    if [ -z "${deployment_tenant_profile:-}" ] || [ "${deployment_tenant_profile}" = "__DEPLOYMENT_TENANT_PROFILE__" ]; then
+        echo "ERROR: deployment_tenant_profile is not set — it is the persisted-resource identity and has NO default." >&2
+        echo "       Set it before publishing; it must NOT derive from temporary_aws_profile_name or any changing value." >&2
+        exit 1
+    fi
+}
+
+# AWS
+export AWS_REGION="${AWS_REGION:-__DEPLOY_REGION_BETA__}"
+
+# Publish buckets (PERSISTED; owned by deployment_tenant_profile). The wheel is
+# uploaded here; served public-read for `pip install`. Explicit tokens — never
+# derived from the throwaway profile.
+export PACKAGE_S3_BUCKET_BETA="__PACKAGE_S3_BUCKET_BETA__"
+export PACKAGE_S3_BUCKET_PROD="__PACKAGE_S3_BUCKET_PROD__"
+
+# Resolve the publish bucket for a stage (beta|prod).
+s3_upload_bucket_name() {
+    local stage_lower="${1:?stage required}"
+    case "$stage_lower" in
+        beta) printf "%s" "$PACKAGE_S3_BUCKET_BETA" ;;
+        prod) printf "%s" "$PACKAGE_S3_BUCKET_PROD" ;;
+        *) echo "ERROR: unknown stage '${stage_lower}'" >&2; return 1 ;;
+    esac
+}

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Local-shell BETA publish: configure SSO profile -> SSO-login -> verify -> publish.
+#
+# The SSO profile is named after this repo/folder and is SELF-CONFIGURED here
+# (start URL / account / region written into ~/.aws/config before login), so no
+# manual `aws configure sso` is needed. AWS_PROFILE is exported only into this
+# script's subprocess tree.
+#
+# This is the DEPLOYMENT profile (the SSO identity you publish as). It is handed
+# to the publish script via PARAM_PROFILE_NAME; provider_login.sh takes its SSO
+# path (no static deploy keys), verifying the SSO session instead of assuming a role.
+#
+# Override via env:
+#   AWS_SSO_PROFILE   default = this folder's name
+#   SSO_START_URL     default __SSO_START_URL__
+#   SSO_REGION        default __SSO_REGION__ (region of the IAM Identity Center portal)
+#   EXPECTED_ACCOUNT  default __AWS_ACCOUNT_ID__ (beta account)
+#   DEPLOY_REGION     default __DEPLOY_REGION_BETA__
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Profile name = this repo/folder name (sanitized to what AWS profile names allow).
+AWS_SSO_PROFILE="${AWS_SSO_PROFILE:-$(basename "$PWD" | LC_ALL=C tr -c 'a-zA-Z0-9_-' '-' | sed 's/-*$//; s/^-*//')}"
+SSO_START_URL="${SSO_START_URL:-__SSO_START_URL__}"
+SSO_REGION="${SSO_REGION:-__SSO_REGION__}"
+EXPECTED_ACCOUNT="${EXPECTED_ACCOUNT:-__AWS_ACCOUNT_ID__}"
+DEPLOY_REGION="${DEPLOY_REGION:-__DEPLOY_REGION_BETA__}"
+
+# Source centralized helper functions
+source ./infra/provider_login.sh
+
+main() {
+    # Configure the SSO profile, log in (browser), and verify the account.
+    login_with_sso "$AWS_SSO_PROFILE" "$SSO_START_URL" "$SSO_REGION" "$EXPECTED_ACCOUNT" "$DEPLOY_REGION"
+
+    # The publish script reads PARAM_PROFILE_NAME to take its SSO path and use
+    # this profile. Optional local overrides come from a gitignored env file.
+    export PARAM_PROFILE_NAME="$AWS_SSO_PROFILE"
+    [ -f z_local_env.beta.sh ] && { set -a; source z_local_env.beta.sh; set +a; }
+
+    echo "Starting BETA build & publish as profile '${AWS_SSO_PROFILE}'..."
+    ./z_build_and_publish_beta.sh
+}
+
+main "$@"

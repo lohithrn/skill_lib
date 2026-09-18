@@ -1,6 +1,6 @@
 ---
 name: codegraph-cartographer
-description: Builds the measured module dependency graph for the `graph` dimension of /codegraph — cycles, hubs, fan-in/out, I/A/D, communities vs folders, layer violations — and writes .codegraph/graph.dim.json for phase 1c to merge; use it in phase 1 of analyze, never for editing code.
+description: Builds the measured module dependency graph for the `graph` dimension of /md_codegraph — cycles, hubs, fan-in/out, I/A/D, communities vs folders, layer violations — and writes .codegraph/graph.dim.json for phase 1c to merge; use it in phase 1 of analyze, never for editing code.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -46,7 +46,7 @@ edge is illegal, so a per-edge list is thousands of lines that name no slice.
 `references/graph-tooling.md` (exact commands per language) · `references/graph-metrics.md`
 (formulas and thresholds) · `references/doctrine.md` §9 (the layer rule) ·
 `specs/graph-report.md` · `specs/finding.md`. Resolve them under
-`${CLAUDE_PLUGIN_ROOT}/skills/codegraph/` when the prompt gives no absolute path. If a listed
+`${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/` when the prompt gives no absolute path. If a listed
 reference file does not exist, say so in `degraded` and continue with the schema alone — do not
 substitute another file.
 
@@ -56,7 +56,7 @@ substitute another file.
    prompt states the root and the exclusions literally.
 2. Run the bundled script. It is the baseline measurement, and the command to run is
    `tools.graph.command` from `.codegraph/oracle.json` — an absolute path resolved in phase 0.
-   No oracle file ⇒ resolve it yourself, `${CLAUDE_PLUGIN_ROOT}/skills/codegraph/scripts/graph.sh`,
+   No oracle file ⇒ resolve it yourself, `${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/scripts/graph.sh`,
    and never run a command still containing an unexpanded `${...}`. Redirect to
    `.codegraph/graph.raw.json`. Run it; never read it.
 3. Check for native tooling with `command -v` before using it: `grimp` / `lint-imports` /

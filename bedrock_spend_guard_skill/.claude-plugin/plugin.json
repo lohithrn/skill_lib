@@ -1,0 +1,20 @@
+{
+  "name": "bedrock-spend-guard",
+  "displayName": "Bedrock Spend Guard",
+  "description": "Deploys an account-wide Amazon Bedrock spend circuit breaker: a monthly AWS Budget filtered to Amazon Bedrock whose budget action attaches a Deny(bedrock:*) policy to named IAM groups and roles at 100% of the limit, plus a scheduled Lambda that detaches it on the 1st at 12:00 GMT so access resumes. Idempotent, account-agnostic, with a mandatory account confirmation gate and a full teardown path.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lohith"
+  },
+  "license": "MIT",
+  "keywords": [
+    "aws",
+    "bedrock",
+    "cost-control",
+    "budgets",
+    "circuit-breaker",
+    "iam",
+    "finops",
+    "guardrails"
+  ]
+}

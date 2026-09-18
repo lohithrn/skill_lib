@@ -1,0 +1,16 @@
+#!/bin/bash
+# Shell script to clean build artifacts for __PROJECT_NAME__
+
+set -e
+
+# Get the script directory and navigate to the project root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+cd "$PROJECT_ROOT"
+
+echo "Cleaning build artifacts..."
+rm -rf build/
+rm -rf dist/
+rm -rf *.egg-info
+find . -name '*.pyc' -delete
+find . -name '__pycache__' -delete

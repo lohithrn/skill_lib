@@ -1,0 +1,59 @@
+#!/bin/bash
+# infra/aws_account_config.sh
+# ─────────────────────────────────────────────────────────────────────────────
+# SINGLE SOURCE OF TRUTH: which AWS account each environment deploys into.
+#
+# Set the account id ONCE here. Everything else derives the expected account
+# from this file — the profile's account id, the CI deploy-role ARN, and the
+# post-login assertion. NEVER hardcode a bare 12-digit account id anywhere
+# else; reference these helpers instead.
+#
+# The two variables may hold the SAME account today. That is deliberate
+# headroom, not duplication: the per-environment lookup already exists, so
+# splitting prod into its own account later is a one-line change here rather
+# than a re-plumbing of every script.
+#
+# Override per-environment from the environment if ever needed:
+#   AWS_ACCOUNT_BETA=<account-id> ./z_setup_deploy_beta.sh
+# ─────────────────────────────────────────────────────────────────────────────
+
+AWS_ACCOUNT_BETA="${AWS_ACCOUNT_BETA:-REPLACE_WITH_BETA_ACCOUNT_ID}"
+AWS_ACCOUNT_PROD="${AWS_ACCOUNT_PROD:-REPLACE_WITH_PROD_ACCOUNT_ID}"
+
+# Resolve the expected account id for an environment. Prints empty for an
+# unknown environment (callers treat empty as a hard error).
+aws_expected_account() {
+    case "$1" in
+        beta) printf '%s' "$AWS_ACCOUNT_BETA" ;;
+        prod) printf '%s' "$AWS_ACCOUNT_PROD" ;;
+        *)    printf '' ;;
+    esac
+}
+
+# Assert that the credentials resolved by --profile land in the account this
+# environment is supposed to deploy into. Call this AFTER every login /
+# assume-role and BEFORE any AWS mutation. Refuses to continue on mismatch,
+# on an unknown environment, or when no session resolves at all.
+assert_aws_account() {
+    local profile="$1" environment="$2"
+    local expected actual
+    expected="$(aws_expected_account "$environment")"
+    if [ -z "$expected" ]; then
+        echo "ERROR: no expected AWS account configured for environment '${environment}'." >&2
+        echo "       Add it to infra/aws_account_config.sh before deploying." >&2
+        exit 1
+    fi
+    actual="$(aws sts get-caller-identity --profile "$profile" --query Account --output text 2>/dev/null)"
+    if [ -z "$actual" ] || [ "$actual" = "None" ]; then
+        echo "ERROR: could not resolve an AWS account for profile '${profile}'." >&2
+        echo "       The profile has no valid session — the deploy script must sign in first." >&2
+        exit 1
+    fi
+    if [ "$actual" != "$expected" ]; then
+        echo "ERROR: profile '${profile}' resolves to account ${actual}, but '${environment}' must deploy to ${expected}." >&2
+        echo "       Refusing to continue against the wrong account." >&2
+        echo "       (If ${actual} is intentional, update infra/aws_account_config.sh.)" >&2
+        exit 1
+    fi
+    echo "✓ Verified AWS account ${actual} for '${environment}' (profile '${profile}')."
+}

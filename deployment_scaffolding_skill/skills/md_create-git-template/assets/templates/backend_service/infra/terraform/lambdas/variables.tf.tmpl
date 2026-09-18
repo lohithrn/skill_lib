@@ -1,0 +1,66 @@
+variable "lambda_name" {
+  description = "Name of the Lambda."
+  type        = string
+}
+
+variable "handler" {
+  description = "Lambda handler `filename.function_name`."
+  type        = string
+}
+
+variable "runtime" {
+  description = "Lambda runtime (e.g. python3.10)."
+  type        = string
+  default     = "python3.10"
+}
+
+variable "memory_size" {
+  description = "Lambda execution memory size (MB)."
+  type        = number
+  default     = 128
+}
+
+variable "environment_variables" {
+  description = "Environment variables for the Lambda."
+  type        = map(string)
+  default     = {}
+}
+
+variable "timeout" {
+  description = "Lambda execution timeout (seconds)."
+  type        = number
+  default     = 60
+}
+
+variable "tags" {
+  default = null
+}
+
+variable "file_path" {
+  description = "Path to the deployment zip artifact."
+  type        = string
+}
+
+variable "aws_profile" {
+  description = "AWS profile (credentials pointer)."
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region."
+  type        = string
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch Logs retention for the Lambda's log group (days). Bounds storage cost."
+  type        = number
+  default     = 3
+}
+
+# Deploy-time resource-name prefix (`${environment}_${project_name}`). Lets this
+# generic module scope its IAM to THIS service's own resources by ARN pattern
+# (`...:table/<prefix>_*`) without knowing each individual ARN.
+variable "resource_name_prefix" {
+  description = "Resource-name prefix (environment_projectname) used to scope the Lambda IAM policy to this service's own resources by ARN pattern."
+  type        = string
+}

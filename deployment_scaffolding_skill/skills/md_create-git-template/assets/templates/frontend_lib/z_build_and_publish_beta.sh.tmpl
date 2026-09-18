@@ -1,0 +1,101 @@
+#!/bin/bash
+# BETA build & publish for __PROJECT_NAME__ (JS/TS library).
+#   npm install/ci -> npm run build -> npm pack -> upload .tgz to public S3.
+# set -x  # Uncomment for debugging
+set -e
+
+setup_environment_beta() {
+    # tenant_name is BRANDING ONLY. It must never name a persisted resource.
+    export tenant_name="${TENANT_NAME:-__TENANT_NAME__}"
+    export stage="BETA"
+    export SERVICE_NAME=$(basename "$PWD" | tr '[:upper:]' '[:lower:]')
+    export ENVIRONMENT=${stage}
+    export PROJECT_NAME=${SERVICE_NAME}
+
+    # ─── THROWAWAY CLI PROFILE ───
+    # The AWS CLI forces --profile, so we need a credentials pointer. This profile
+    # is created/deleted, its value may change run-to-run, and it MUST NEVER name
+    # any persisted resource. CI assumes the deploy role and writes the session
+    # into this profile; local SSO writes into it. Named after the project folder
+    # so it is identical locally and in the pipeline.
+    export temporary_aws_profile_name="${PROJECT_NAME}"
+    export AWS_PROFILE="${temporary_aws_profile_name}"
+
+    # ─── PERSISTED-RESOURCE IDENTITY (no default — fail loud) ───
+    # Stable tenant identity that owns PERSISTED resources (the publish buckets).
+    # NOTHING persisted may be named from the throwaway profile or any changing
+    # value. The bucket names are explicit __PACKAGE_S3_BUCKET_*__ tokens; this
+    # identity is asserted so the throwaway/branding values are never used for it.
+    export deployment_tenant_profile="__DEPLOYMENT_TENANT_PROFILE__"
+    require_deployment_tenant_profile
+
+    export TENANT_LOWER=$(echo "${tenant_name}" | tr '[:upper:]' '[:lower:]')
+    export PROJECT_NAME_LOWER=$(echo "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')
+    export STAGE_LOWER=$(echo "${stage}" | tr '[:upper:]' '[:lower:]')
+}
+
+# AWS configuration
+export AWS_REGION="__DEPLOY_REGION_BETA__"
+export PACKAGE_NAME="__PACKAGE_NAME__"
+export S3_UPLOAD_BUCKET="__PACKAGE_S3_BUCKET_BETA__"
+
+# Source helpers
+source ./infra/utils.sh
+source ./infra/provider_login.sh
+
+main() {
+    # Establish the throwaway profile + assert the persisted identity FIRST, so
+    # the auth step below writes the session into temporary_aws_profile_name.
+    setup_environment_beta
+
+    # CI path: static base keys assume the deploy role and write the session into
+    # the throwaway profile. Local path: keys are empty and the existing SSO
+    # session (configured by z_deploy_beta_from_local.sh) is used.
+    login_with_assume_role "$FRONTEND_LIB_BETA_AWS_ACCESS_KEY" "$FRONTEND_LIB_BETA_AWS_SECRET_KEY"
+    setup_aws
+
+    # Clean previous artifacts.
+    ./infra/z_clean.sh
+
+    # Run tests before building.
+    ./infra/z_run_local_tests.sh
+
+    # Confirm before publishing when interactive; auto-proceed in CI (no TTY).
+    if [ -t 0 ]; then
+        read -p "Tests passed. Proceed with building and publishing? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Publish step skipped by user."
+            exit 0
+        fi
+    else
+        echo "Non-interactive shell detected — auto-proceeding with publish."
+    fi
+
+    VERSION=$(get_version)
+    PACKAGE_NAME=$(get_package_name)
+    echo "Building and publishing beta version $VERSION of $PACKAGE_NAME..."
+
+    # Build the library.
+    build_package
+
+    # Produce the publishable tarball.
+    TARBALL=$(pack_package) || { echo "Pack failed."; exit 1; }
+    echo "Packed artifact: $TARBALL"
+
+    # Ensure the public-read bucket exists.
+    create_s3_bucket_if_not_exists "$S3_UPLOAD_BUCKET"
+
+    # Upload and print the install URL.
+    if URL=$(upload_to_s3 "$S3_UPLOAD_BUCKET" "$TARBALL" "$PACKAGE_NAME"); then
+        echo "Beta version $VERSION successfully uploaded: $URL"
+        display_s3_access_message "$S3_UPLOAD_BUCKET" "$(basename "$TARBALL")" "$PACKAGE_NAME"
+    else
+        echo "Failed to upload beta version $VERSION to S3."
+        exit 1
+    fi
+
+    echo "Beta build and publish completed successfully!"
+}
+
+main "$@"

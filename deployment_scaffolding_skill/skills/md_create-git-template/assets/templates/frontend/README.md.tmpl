@@ -1,0 +1,68 @@
+# Frontend deploy skeleton
+
+Infra + deploy scaffolding for a JavaScript/Vite web app served as a static site
+from **S3 + CloudFront + Route53**. This directory is a token-based template: the
+scaffolding tool substitutes the `__TOKEN__` placeholders (see `TOKENS.md`) when
+it creates a new repo. It contains only the deploy/infra logic — no app source,
+no `package.json`, no build config.
+
+## What it deploys
+
+- An S3 bucket (named `www.<env>.__DOMAIN_NAME__`) holding the built site, with a
+  static-website configuration and public-read bucket policy.
+- A CloudFront distribution fronting the bucket (HTTPS via the ACM cert, SPA
+  404→/index.html rewrite, aliases for the apex + www hostnames).
+- Route53 A/alias records for the apex domain and its `www` subdomain.
+- Terraform state kept in a per-tenant/per-env S3 backend bucket
+  (`terraform-<env>-<tenant>-state`), created on first run.
+
+Content upload uses a two-pass `aws s3 sync`: immutable long cache for
+content-hashed `assets/*`, short/revalidated cache for HTML + sitemap + robots.
+
+## Profile model — two separate identities
+
+The deploy scripts keep two identities strictly apart:
+
+1. **Throwaway CLI profile** — `temporary_aws_profile_name="${PROJECT_NAME}"`,
+   exported as `AWS_PROFILE`. This is ONLY a credentials pointer (the AWS CLI
+   forces a `--profile`). The assumed-role session is written into it and
+   terraform's provider + S3 backend read from it. It is created/deleted, its
+   value may change run-to-run, and it MUST NEVER name any persisted resource.
+
+2. **Persisted-resource identity** — `deployment_tenant_profile`, sourced from
+   the `__DEPLOYMENT_TENANT_PROFILE__` token (override via `DEPLOYMENT_TENANT_PROFILE`).
+   This stable value names persisted resources: the terraform state bucket
+   (`terraform-<env>-<deployment_tenant_profile>-state`) and resource suffixes.
+   It is decoupled from the throwaway CLI profile and from `PROJECT_NAME`.
+   It has **NO default** — if empty/unset, the deploy scripts echo a clear error
+   to stderr and `exit 1` BEFORE any AWS action, rather than silently falling
+   back to `tenant_name`, `PROJECT_NAME`, or anything else (which would drift
+   state between environments).
+
+`tenant_name` (`__TENANT_NAME__`) is branding/display only (`VITE_TENANT`) and
+must never name a persisted resource.
+
+## Layout
+
+- `infra/provider_login.sh` — AWS auth helpers: SSO login (local) and
+  assume-role (CI), plus project-local `.aws` isolation.
+- `infra/terraform_utils.sh` — terraform backend bootstrap, tfvars generation,
+  init/plan/apply orchestration.
+- `infra/utils.sh` — print helpers, `setup_aws`, `build_web_app`, dotenv writer.
+- `infra/setup_dependency.sh` — optional Python venv bootstrap.
+- `infra/terraform/*.tf` — S3, CloudFront, Route53, variables, outputs (all
+  driven by `var.*`; values come from the deploy scripts' tfvars).
+- `pipline/azure-pipelines.yml` — ADO pipeline: beta stage then prod stage,
+  each running the matching `z_setup_*` script with CI access-key secrets.
+
+## Order the z_ scripts run
+
+- **Local dev:** `z_run_locally.sh` — writes a local `.env` and starts Vite.
+- **Local deploy (beta):** `z_deploy_beta_from_local.sh` → SSO login →
+  exports `PARAM_PROFILE_NAME` → calls `z_setup_s3_create_deploy_beta.sh`.
+- **CI deploy:** the pipeline runs `z_setup_s3_create_deploy_beta.sh`, then on
+  success `z_setup_s3_create_deploy_prod.sh`. Each script assumes its deploy
+  role from CI access keys, builds the site, and runs terraform.
+
+`z_setup_s3_create_deploy_{beta,prod}.sh` are the real entry points: set up env
+→ isolate AWS files → auth → `npm build` → `deploy_terraform`.

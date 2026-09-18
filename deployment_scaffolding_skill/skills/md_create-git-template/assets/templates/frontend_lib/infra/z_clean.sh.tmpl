@@ -1,0 +1,14 @@
+#!/bin/bash
+# Clean build artifacts for __PROJECT_NAME__ (JS/TS library).
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+cd "$PROJECT_ROOT"
+
+echo "Cleaning build artifacts..."
+rm -rf dist/
+rm -rf build/
+rm -rf lib/
+# Remove any previously packed tarballs.
+rm -f ./*.tgz

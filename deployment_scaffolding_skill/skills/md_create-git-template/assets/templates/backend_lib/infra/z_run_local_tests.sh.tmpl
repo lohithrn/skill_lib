@@ -1,0 +1,15 @@
+#!/bin/bash
+# Throwaway CLI credentials pointer; falls back to the project-named profile.
+PROFILE="${PARAM_PROFILE_NAME:-${temporary_aws_profile_name:-__PROJECT_NAME__}}"
+# Shell script to run local tests for __PROJECT_NAME__
+
+set -e
+
+# Get the script directory and navigate to the project root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+cd "$PROJECT_ROOT"
+
+echo "Running unit tests..."
+export AWS_PROFILE=$PROFILE
+SKIP_IDE_ONLY_TESTS=true python3 -m unittest discover -s tests

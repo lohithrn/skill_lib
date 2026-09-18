@@ -1,0 +1,24 @@
+# Single source of truth for resource naming.
+#
+# Every resource in this service should be named
+# `<prefix>_<resource_role>_<deployment_tenant_profile>`:
+#   - prefix         = "${environment}_${project_name}" (derived from the repo
+#                      folder name at deploy time — never hardcoded)
+#   - resource_role  = the per-resource descriptive middle (e.g. "service")
+#   - tenant_suffix  = the persisted-resource identity, lowercased
+#                      (deployment_tenant_profile from the deploy scripts ->
+#                      var.deployment_tenant_profile). This is the SAME identity
+#                      that names the terraform state bucket.
+#
+# Centralizing the composition here keeps each resource file referencing one
+# local instead of re-spelling the prefix/suffix rule, so a change to the naming
+# convention happens in exactly one place. Add one local per resource you own.
+locals {
+  # Persisted-resource suffix, lowercased. AWS resource names are case-sensitive
+  # and the convention requires this suffix to be lowercase regardless of how the
+  # deploy script spells deployment_tenant_profile (e.g. "Acme" -> "acme").
+  tenant_suffix = lower(var.deployment_tenant_profile)
+
+  # Example resource name — add your own here as you define real compute/storage.
+  service_name = "${var.prefix}_service_${local.tenant_suffix}"
+}

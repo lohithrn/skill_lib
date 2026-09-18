@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Local-shell BETA deploy: configure SSO profile → SSO-login → verify → deploy.
+#
+# Override via env:
+#   AWS_SSO_PROFILE   default = this folder's name
+#   SSO_START_URL     default __SSO_START_URL__
+#   SSO_REGION        default __SSO_REGION__
+#   EXPECTED_ACCOUNT  default __AWS_ACCOUNT_ID__
+#   DEPLOY_REGION     default __DEPLOY_REGION_BETA__
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+AWS_SSO_PROFILE="${AWS_SSO_PROFILE:-$(basename "$PWD" | tr -c 'a-zA-Z0-9_-' '-' | sed 's/-*$//; s/^-*//')}"
+SSO_START_URL="${SSO_START_URL:-__SSO_START_URL__}"
+SSO_REGION="${SSO_REGION:-__SSO_REGION__}"
+EXPECTED_ACCOUNT="${EXPECTED_ACCOUNT:-__AWS_ACCOUNT_ID__}"
+DEPLOY_REGION="${DEPLOY_REGION:-__DEPLOY_REGION_BETA__}"
+
+# Source centralized helper functions
+source ./infra/provider_login.sh
+
+main() {
+    # Isolate AWS creds/config to project-local files before SSO login so the
+    # SSO profile is written to the same location terraform later reads.
+    use_project_local_aws_files
+
+    # Perform SSO authentication and configuration
+    login_with_sso "$AWS_SSO_PROFILE" "$SSO_START_URL" "$SSO_REGION" "$EXPECTED_ACCOUNT" "$DEPLOY_REGION"
+
+    # Export configuration profile name for deployment script
+    export PARAM_PROFILE_NAME="$AWS_SSO_PROFILE"
+    [ -f z_local_env.beta.sh ] && { set -a; source z_local_env.beta.sh; set +a; }
+
+    echo "▸ Starting BETA deploy as profile '${AWS_SSO_PROFILE}'..."
+    ./z_setup_s3_create_deploy_beta.sh
+}
+
+main "$@"

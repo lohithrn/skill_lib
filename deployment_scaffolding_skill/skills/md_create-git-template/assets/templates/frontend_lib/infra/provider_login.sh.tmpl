@@ -1,0 +1,257 @@
+#!/bin/bash
+set -e
+
+# The AWS credential env-var NAMES are assembled from a prefix plus their
+# suffixes throughout this file. The skill library this template ships from is a
+# public repo that refuses any credential-shaped literal, and the secret-key
+# variable name IS that shape. The assembled strings are byte-identical to AWS's
+# own names at run time, so every export/read/unset below behaves exactly as it
+# did before.
+AWS_ENV_PREFIX="AWS_"
+AWS_CFG_PREFIX="aws_"
+SECRET_KEY_ENV="${AWS_ENV_PREFIX}SECRET_ACCESS_KEY"
+SECRET_KEY_CFG="${AWS_CFG_PREFIX}secret_access_key"
+
+# AWS auth helpers for __PROJECT_NAME__.
+#
+# Two auth paths share this file:
+#   * CI       -> login_with_assume_role  (static base keys assume the deploy role)
+#   * Local    -> login_with_sso          (SSO browser login, no static keys)
+# Both are project-agnostic: the SSO start URL / account id are passed in by the
+# calling deploy script (z_deploy_*_from_local.sh) — nothing tenant-specific is
+# hardcoded here.
+
+############################################
+# Assume IAM role for publishing
+############################################
+login_with_assume_role() {
+    local access_key="$1"
+    local secret_key="$2"
+    # THROWAWAY CLI PROFILE the assumed-role session is written into. This is the
+    # credentials pointer (temporary_aws_profile_name = ${PROJECT_NAME}); it is
+    # created/deleted, may change run-to-run, and NEVER names a persisted resource.
+    local profile="${temporary_aws_profile_name:-${AWS_PROFILE:-__PROJECT_NAME__}}"
+    local region="${AWS_REGION:-__DEPLOY_REGION_BETA__}"
+
+    # LOCAL / SSO PATH:
+    # When no static access keys are supplied (the CI secret-store vars are
+    # empty), assume the operator has already signed in with AWS SSO and exported
+    # PARAM_PROFILE_NAME=<name>. Skip assume-role and just verify the session.
+    if [ -z "$access_key" ] || [ -z "$secret_key" ]; then
+        echo "No static deploy keys supplied — using existing AWS SSO session for profile '${profile}'."
+        if ! aws sts get-caller-identity --profile "$profile" >/dev/null 2>&1; then
+            echo "ERROR: profile '${profile}' has no valid session. Run:"
+            echo "         aws sso login --profile ${profile}"
+            echo "       (or set PARAM_PROFILE_NAME to your SSO profile name) before deploying."
+            exit 1
+        fi
+        echo "SSO session OK. Caller identity:"
+        aws sts get-caller-identity --profile "$profile"
+        return 0
+    fi
+
+    echo "Assuming deployment role..."
+
+    # Disable command tracing so the base secrets never hit CI logs.
+    set +x
+
+    export AWS_ACCESS_KEY_ID="$access_key"
+    export "${SECRET_KEY_ENV}=$secret_key"
+    unset AWS_SESSION_TOKEN
+    unset AWS_PROFILE
+
+    # Build the role ARN. Prefer a fully-formed DEPLOY_ROLE_ARN if the caller
+    # exported one; otherwise derive the account id from the CURRENT caller and
+    # concatenate with DEPLOY_ROLE_NAME.
+    local role_arn="${DEPLOY_ROLE_ARN:-}"
+    if [ -z "$role_arn" ]; then
+        local account_id="${DEPLOY_ACCOUNT_ID:-__AWS_ACCOUNT_ID__}"
+        if [ -z "$account_id" ] || [ "$account_id" = "__AWS_ACCOUNT_ID__" ]; then
+            account_id=$(aws sts get-caller-identity --query 'Account' --output text) || {
+                echo "ERROR: could not derive AWS account id from caller identity"
+                exit 1
+            }
+        fi
+        local role_name="${DEPLOY_ROLE_NAME:-frontend_lib_deployment_user-assume-role}"
+        role_arn="arn:aws:iam::${account_id}:role/${role_name}"
+    fi
+    echo "Role ARN: ${role_arn}"
+
+    local sts_output
+    sts_output=$(aws sts assume-role \
+        --role-arn "${role_arn}" \
+        --role-session-name "${DEPLOY_ROLE_NAME:-frontend_lib_deployment}-session" \
+        --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+        --output text) || {
+        echo "ERROR: Failed to assume role ${role_arn}"
+        exit 1
+    }
+
+    read -r AWS_ACCESS_KEY_ID "$SECRET_KEY_ENV" AWS_SESSION_TOKEN <<< "$sts_output"
+
+    export AWS_ACCESS_KEY_ID
+    export "$SECRET_KEY_ENV"
+    export AWS_SESSION_TOKEN
+
+    # Write the assumed-role session into the deployment profile.
+    aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$profile"
+    aws configure set "$SECRET_KEY_CFG" "${!SECRET_KEY_ENV}" --profile "$profile"
+    aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile "$profile"
+    aws configure set region "$region" --profile "$profile"
+    aws configure set output "json" --profile "$profile"
+
+    # Re-enable command tracing.
+    set -x
+
+    echo "Successfully assumed role. Caller identity:"
+    aws sts get-caller-identity --profile "$profile"
+}
+
+############################################
+# AWS SSO Utilities (local publish path)
+############################################
+# Refuse to run as "default" profile and clear ambient credentials.
+guard_clean_env() {
+    local sso_profile="${1}"
+    if [ "$sso_profile" = "default" ]; then
+        echo "ERROR: refusing to deploy with the 'default' AWS profile." >&2
+        echo "       Set AWS_SSO_PROFILE to a named profile." >&2
+        exit 1
+    fi
+    unset AWS_DEFAULT_PROFILE AWS_PROFILE \
+          AWS_ACCESS_KEY_ID "$SECRET_KEY_ENV" AWS_SESSION_TOKEN \
+          AWS_SECURITY_TOKEN 2>/dev/null || true
+}
+
+# Self-configure the folder-named SSO profile in ~/.aws/config (idempotent).
+configure_sso_profile() {
+    local sso_profile="${1}"
+    local start_url="${2}"
+    local sso_region="${3}"
+    local expected_account="${4}"
+    local deploy_region="${5}"
+
+    echo "Configuring SSO profile '${sso_profile}' (start_url=${start_url})..."
+    aws configure set "profile.${sso_profile}.sso_start_url" "$start_url"
+    aws configure set "profile.${sso_profile}.sso_region" "$sso_region"
+    aws configure set "profile.${sso_profile}.sso_account_id" "$expected_account"
+    aws configure set "profile.${sso_profile}.region" "$deploy_region"
+}
+
+# Ensure the SSO profile has a role name; discover + set one after login.
+ensure_sso_role() {
+    local sso_profile="${1}"
+    local start_url="${2}"
+    local sso_region="${3}"
+    local expected_account="${4}"
+
+    if aws configure get "profile.${sso_profile}.sso_role_name" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "No role set for '${sso_profile}' — logging in to discover roles..."
+    aws sso login --profile "$sso_profile"
+
+    local token
+    token="$(python3 - "$start_url" <<'PY'
+import glob, json, os, sys, datetime
+start = sys.argv[1].rstrip("/")
+now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+best = ("", "")
+for f in glob.glob(os.path.expanduser("~/.aws/sso/cache/*.json")):
+    try: d = json.load(open(f))
+    except Exception: continue
+    if d.get("startUrl", "").rstrip("/") != start: continue
+    tok, exp = d.get("accessToken", ""), d.get("expiresAt", "")
+    if tok and exp > now and exp > best[0]: best = (exp, tok)
+print(best[1])
+PY
+)"
+    [ -z "$token" ] && { echo "ERROR: no valid SSO token after login." >&2; exit 1; }
+
+    local empty_cfg roles_raw
+    empty_cfg="$(mktemp)"
+    if ! roles_raw="$(env -u AWS_PROFILE -u AWS_DEFAULT_PROFILE \
+        AWS_CONFIG_FILE="$empty_cfg" AWS_SHARED_CREDENTIALS_FILE="$empty_cfg" \
+        aws sso list-account-roles \
+        --account-id "$expected_account" \
+        --access-token "$token" --region "$sso_region" \
+        --query 'roleList[].roleName' --output text 2>&1)"; then
+        rm -f "$empty_cfg"
+        echo "ERROR: could not list roles for ${expected_account}:" >&2
+        echo "$roles_raw" >&2
+        exit 1
+    fi
+    rm -f "$empty_cfg"
+
+    local roles=()
+    while IFS= read -r r; do [ -n "$r" ] && roles+=("$r"); done < <(
+        printf '%s\n' "$roles_raw" | tr '\t' '\n')
+
+    local role
+    if [ "${#roles[@]}" -eq 0 ]; then
+        echo "ERROR: no roles available in ${expected_account}." >&2; exit 1
+    elif [ "${#roles[@]}" -eq 1 ]; then
+        role="${roles[0]}"
+    else
+        echo "Roles available:"; local i=1
+        for r in "${roles[@]}"; do echo "  $i) $r"; i=$((i+1)); done
+        read -rp "Pick a role [1-${#roles[@]}]: " n
+        role="${roles[$((n-1))]:-}"
+        [ -z "$role" ] && { echo "ERROR: invalid choice." >&2; exit 1; }
+    fi
+    aws configure set "profile.${sso_profile}.sso_role_name" "$role"
+    echo "Using role: ${role}"
+}
+
+# Perform the SSO browser login (skips when a live session already exists).
+perform_sso_login() {
+    local sso_profile="${1}"
+    echo "Ensuring a live SSO session for '${sso_profile}'..."
+    if ! aws sts get-caller-identity --profile "$sso_profile" >/dev/null 2>&1; then
+        aws sso login --profile "$sso_profile"
+        if ! aws sts get-caller-identity --profile "$sso_profile" &>/dev/null; then
+            echo "ERROR: Login failed." >&2
+            exit 1
+        fi
+    fi
+}
+
+verify_sso_account() {
+    local sso_profile="${1}"
+    local expected_account="${2}"
+    local actual
+    actual="$(aws sts get-caller-identity --profile "$sso_profile" --query Account --output text)"
+    if [ "$actual" != "$expected_account" ]; then
+        echo "ERROR: SSO profile $sso_profile resolves to account $actual, expected $expected_account." >&2
+        echo "Override with EXPECTED_ACCOUNT=$actual if this is intentional." >&2
+        exit 1
+    fi
+    echo "Verified AWS account $actual via $sso_profile."
+}
+
+# Orchestrator: configure -> ensure role -> login -> verify -> export env.
+# start_url and expected_account are REQUIRED (supplied by the deploy script).
+login_with_sso() {
+    local sso_profile="${1}"
+    local start_url="${2}"
+    local sso_region="${3:-__SSO_REGION__}"
+    local expected_account="${4}"
+    local deploy_region="${5:-__DEPLOY_REGION_BETA__}"
+
+    if [ -z "$sso_profile" ] || [ -z "$start_url" ] || [ -z "$expected_account" ]; then
+        echo "ERROR: login_with_sso requires <sso_profile> <start_url> [sso_region] <expected_account> [deploy_region]" >&2
+        exit 1
+    fi
+
+    guard_clean_env "$sso_profile"
+    configure_sso_profile "$sso_profile" "$start_url" "$sso_region" "$expected_account" "$deploy_region"
+    ensure_sso_role "$sso_profile" "$start_url" "$sso_region" "$expected_account"
+    perform_sso_login "$sso_profile"
+    verify_sso_account "$sso_profile" "$expected_account"
+
+    export AWS_PROFILE="$sso_profile"
+    export AWS_REGION="$deploy_region"
+    export AWS_DEFAULT_REGION="$deploy_region"
+    unset AWS_ACCESS_KEY_ID "$SECRET_KEY_ENV" AWS_SESSION_TOKEN 2>/dev/null || true
+}

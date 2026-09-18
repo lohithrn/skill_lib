@@ -1,0 +1,97 @@
+#!/bin/bash
+set -x # Uncomment for debugging
+set -e
+
+# Build the wheel, run tests, and publish to the BETA S3 bucket.
+# Run from CI (assume-role via static keys) or locally (via z_deploy_beta_from_local.sh, SSO).
+
+# Single source of truth for project constants (TENANT_NAME, PROJECT_NAME,
+# PACKAGE_NAME, buckets, regions). All tokens live there.
+source "$(dirname "${BASH_SOURCE[0]}")/project_constants.sh"
+
+# Source utility functions
+source ./infra/utils.sh
+source ./infra/provider_login.sh
+
+# CI path: assume the backend deployment role using static keys injected by the
+# pipeline. Local path: keys are empty -> provider_login verifies the SSO session.
+login_with_assume_role "$BETA_BACKEND_AWS_ACCESS_KEY" "$BETA_BACKEND_AWS_SECRET_KEY"
+
+setup_environment_beta() {
+    export VENV_NAME="${TENANT_NAME}_venv"
+    export stage="BETA"
+    export STAGE_LOWER="beta"
+    export SERVICE_NAME="$PROJECT_NAME"
+    # Throwaway CLI credentials pointer (never names persisted resources).
+    PROFILE="${PARAM_PROFILE_NAME:-${temporary_aws_profile_name}}"
+    export temporary_aws_profile_name="$PROFILE"
+    export AWS_PROFILE="$PROFILE"
+    export AWS_REGION="__DEPLOY_REGION_BETA__"
+
+    # Copy the beta environment file to env_export.sh if it exists
+    if [ -f z_beta_url_env ]; then
+        cp z_beta_url_env env_export.sh
+    fi
+
+    setup_venv
+}
+
+main() {
+    setup_environment_beta
+    setup_aws
+
+    # Persisted-resource identity must be set before we name/touch any bucket.
+    require_deployment_tenant_profile
+    export S3_UPLOAD_BUCKET="$(s3_upload_bucket_name "$STAGE_LOWER")"
+
+    # Clean the environment
+    ./infra/z_clean.sh
+
+    # Install dev dependencies
+    install_dev
+
+    # Run tests before building
+    ./infra/z_run_local_tests.sh
+    TEST_EXIT_CODE=$?
+    if [ $TEST_EXIT_CODE -ne 0 ]; then
+        echo "Tests failed. Aborting build and publish."
+        exit $TEST_EXIT_CODE
+    fi
+
+    # Ask for confirmation before publishing — only when running interactively.
+    # In CI (no TTY on stdin) `read` would block forever, so auto-proceed.
+    if [ -t 0 ]; then
+        read -p "Tests passed. Do you want to proceed with building and publishing? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Publish step skipped by user."
+            exit 0
+        fi
+    else
+        echo "Non-interactive shell detected — auto-proceeding with publish."
+    fi
+
+    # Get the current version
+    VERSION=$(get_version)
+    echo "Building and publishing beta version $VERSION..."
+
+    # Build the wheel
+    build_package
+
+    echo "$AWS_PROFILE"
+    # Create the S3 bucket if it doesn't exist
+    create_s3_bucket_if_not_exists "$S3_UPLOAD_BUCKET" "$AWS_REGION"
+
+    # Upload to S3
+    if upload_to_s3 "$S3_UPLOAD_BUCKET" "$VERSION" "$PACKAGE_NAME"; then
+        echo "Beta version $VERSION successfully uploaded to S3."
+        display_s3_access_message "$S3_UPLOAD_BUCKET" "$PACKAGE_NAME"
+    else
+        echo "Failed to upload beta version $VERSION to S3."
+        exit 1
+    fi
+
+    echo "Beta build and publish completed successfully!"
+}
+
+main "$@"

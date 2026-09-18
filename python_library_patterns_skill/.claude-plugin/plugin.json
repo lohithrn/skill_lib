@@ -1,0 +1,23 @@
+{
+  "name": "python-library-patterns",
+  "displayName": "Python Library Patterns",
+  "description": "Three skills for in-house Python shared libraries: the baked-manifest artifact lifecycle (deploy a wheel with its resource manifest inside, publish per beta/prod stage, build and upload artifacts, query them at runtime), the shared library repo scaffold and its packaging/pipeline guardrails, and the procedure for writing, staging and verifying an old-to-new import map when a library's public surface is refactored.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lohith"
+  },
+  "license": "MIT",
+  "keywords": [
+    "python",
+    "shared-library",
+    "packaging",
+    "setup.py",
+    "wheel",
+    "resource-manifest",
+    "artifact-lifecycle",
+    "s3",
+    "beta-prod",
+    "import-migration",
+    "refactoring"
+  ]
+}

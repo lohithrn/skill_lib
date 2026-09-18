@@ -1,0 +1,265 @@
+#!/bin/bash
+# Utility functions for __PROJECT_NAME__ build & publish scripts.
+#
+# This is a JavaScript/TypeScript LIBRARY that is BUILT with npm and PUBLISHED
+# (as an `npm pack` tarball) to a public-read S3 bucket, then installed by
+# consumers straight from the tarball URL. There is NO web-app deploy here and
+# NO Python/pip/wheel logic — the build produces a single <package>-<version>.tgz.
+
+###########################################
+# Identity guards
+###########################################
+# The persisted-resource identity has NO silent default. If a script sets
+# deployment_tenant_profile to an empty value (or leaves the token unreplaced),
+# fail loudly rather than let a persisted resource be named from a changing or
+# placeholder value. tenant_name (branding) and temporary_aws_profile_name
+# (throwaway) must NEVER be substituted here.
+require_deployment_tenant_profile() {
+    if [ -z "${deployment_tenant_profile:-}" ] || [ "${deployment_tenant_profile}" = "__DEPLOYMENT_TENANT_PROFILE__" ]; then
+        echo "ERROR: deployment_tenant_profile is not set." >&2
+        echo "       This is the stable identity that owns persisted resources (the" >&2
+        echo "       S3 publish buckets); it has NO default. Replace the" >&2
+        echo "       __DEPLOYMENT_TENANT_PROFILE__ token (or export deployment_tenant_profile)." >&2
+        exit 1
+    fi
+}
+
+###########################################
+# Node / npm build
+###########################################
+# Install dependencies and build the library. Uses nvm to pin a Node version
+# when available, otherwise falls back to whatever node/npm is on PATH.
+build_package() {
+    echo "Building package..."
+
+    # Pin a Node version when nvm is present (CI images / local dev both work).
+    if command -v nvm >/dev/null 2>&1; then
+        nvm use "${NODE_VERSION:-18}" || nvm use stable || true
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "Error: npm is not installed. Please install Node.js/npm first."
+        return 1
+    fi
+
+    # Reproducible install when a lockfile exists; plain install otherwise.
+    if [ -f package-lock.json ]; then
+        npm ci
+    else
+        npm install
+    fi
+
+    # Compile / bundle the library (tsc, rollup, vite build, etc. — whatever the
+    # package.json "build" script defines). Skip gracefully if there is none.
+    if npm run | grep -qE '^  build'; then
+        npm run build
+    else
+        echo "No 'build' script in package.json — skipping build step."
+    fi
+
+    echo "Build completed successfully."
+}
+
+# Produce the publishable artifact: an `npm pack` tarball. npm pack prints the
+# created filename to stdout, which we echo so the caller can capture the exact
+# name (correctly handles scoped names like @scope/pkg -> scope-pkg-x.y.z.tgz).
+pack_package() {
+    echo "Packing tarball with 'npm pack'..." >&2
+    local tarball
+    tarball="$(npm pack --silent)" || {
+        echo "Error: 'npm pack' failed." >&2
+        return 1
+    }
+    if [ -z "$tarball" ] || [ ! -f "$tarball" ]; then
+        echo "Error: npm pack did not produce a tarball." >&2
+        return 1
+    fi
+    echo "$tarball"
+}
+
+# Read the current version from package.json (no jq dependency; use node).
+get_version() {
+    local version
+    version="$(node -p "require('./package.json').version" 2>/dev/null)"
+    if [ -z "$version" ] || [ "$version" = "undefined" ]; then
+        echo "Error: Could not determine version from package.json" >&2
+        exit 1
+    fi
+    echo "$version"
+}
+
+# Read the package name from package.json.
+get_package_name() {
+    local name
+    name="$(node -p "require('./package.json').name" 2>/dev/null)"
+    if [ -z "$name" ] || [ "$name" = "undefined" ]; then
+        echo "${PACKAGE_NAME:-__PACKAGE_NAME__}"
+        return 0
+    fi
+    echo "$name"
+}
+
+###########################################
+# S3 publish
+###########################################
+# Create a public-read S3 bucket if it does not already exist (idempotent), and
+# (re)apply the public-read bucket policy so published tarballs are installable
+# from their URL by anyone with the link.
+create_s3_bucket_if_not_exists() {
+    local bucket_name=$1
+    local region=${2:-"${AWS_REGION:-__DEPLOY_REGION_BETA__}"}
+
+    echo "Checking if bucket $bucket_name exists..."
+
+    if aws s3api head-bucket --bucket "$bucket_name" --profile "$AWS_PROFILE" 2>/dev/null; then
+        echo "Bucket $bucket_name already exists."
+    else
+        echo "Creating bucket $bucket_name in region $region..."
+        aws s3api create-bucket \
+            --bucket "$bucket_name" \
+            --region "$region" \
+            --create-bucket-configuration LocationConstraint="$region" \
+            --profile "$AWS_PROFILE"
+    fi
+
+    echo "Disabling public access block settings for $bucket_name..."
+    aws s3api put-public-access-block \
+        --bucket "$bucket_name" \
+        --public-access-block-configuration \
+        "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false" \
+        --profile "$AWS_PROFILE"
+
+    echo "Applying public read access policy for $bucket_name..."
+    local policy_file
+    policy_file=$(mktemp)
+    cat > "$policy_file" << EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "PublicReadGetObject",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::$bucket_name/*"
+        }
+    ]
+}
+EOF
+    aws s3api put-bucket-policy --bucket "$bucket_name" --policy file://"$policy_file" --profile "$AWS_PROFILE"
+    rm -f "$policy_file"
+    echo "Public read access policy set for $bucket_name."
+}
+
+# Upload the packed tarball to S3. Publishes two keys:
+#   * the versioned name:  <package>-<version>.tgz  (immutable, what you pin to)
+#   * a "latest" alias:    <package>-latest.tgz     (moving pointer, convenience)
+# Returns the versioned S3 URL on stdout for the caller to print.
+upload_to_s3() {
+    local bucket_name=$1
+    local tarball=$2
+    local package_name=${3:-"__PACKAGE_NAME__"}
+
+    if ! command -v aws >/dev/null 2>&1; then
+        echo "Error: AWS CLI is not installed. Please install it first." >&2
+        return 1
+    fi
+    if [ -z "$tarball" ] || [ ! -f "$tarball" ]; then
+        echo "Error: tarball '$tarball' not found." >&2
+        return 1
+    fi
+
+    local aws_profile_arg=()
+    if [ -n "$AWS_PROFILE" ]; then
+        aws_profile_arg=(--profile "$AWS_PROFILE")
+    fi
+
+    local tarball_basename
+    tarball_basename=$(basename "$tarball")
+
+    echo "Uploading $tarball_basename to s3://$bucket_name/ ..." >&2
+    aws s3 cp "$tarball" "s3://$bucket_name/$tarball_basename" "${aws_profile_arg[@]}" >&2 || {
+        echo "Failed to upload tarball to S3." >&2
+        return 1
+    }
+
+    # Slug for the moving "latest" alias (scoped names contain '/').
+    local slug
+    slug=$(printf '%s' "$package_name" | tr '/@' '--' | sed 's/^-*//')
+    aws s3 cp "$tarball" "s3://$bucket_name/${slug}-latest.tgz" "${aws_profile_arg[@]}" >&2 || true
+
+    echo "https://$bucket_name.s3.amazonaws.com/$tarball_basename"
+}
+
+# Print install instructions for the published artifact.
+display_s3_access_message() {
+    local bucket_name=$1
+    local tarball_basename=$2
+    local package_name=${3:-"__PACKAGE_NAME__"}
+
+    local slug
+    slug=$(printf '%s' "$package_name" | tr '/@' '--' | sed 's/^-*//')
+
+    echo ""
+    echo "==================================================================="
+    echo " Published to public-read bucket: $bucket_name"
+    echo " Install this private package with either of:"
+    echo ""
+    echo "   npm install https://$bucket_name.s3.amazonaws.com/$tarball_basename"
+    echo "   npm install https://$bucket_name.s3.amazonaws.com/${slug}-latest.tgz"
+    echo ""
+    echo " Or add to package.json dependencies:"
+    echo "   \"$package_name\": \"https://$bucket_name.s3.amazonaws.com/$tarball_basename\""
+    echo "==================================================================="
+}
+
+###########################################
+# Print Utilities
+###########################################
+# Color via tput when running on a real terminal; fall back to plain echo in CI
+# (no $TERM set), where tput would fail and abort the script under `set -e`.
+_supports_color() {
+    [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM}" != "dumb" ] && command -v tput >/dev/null 2>&1 && tput setaf 1 >/dev/null 2>&1
+}
+
+print_green() {
+    if _supports_color; then
+        tput setaf 2; echo "$1"; tput sgr0
+    else
+        echo "$1"
+    fi
+}
+
+print_red() {
+    if _supports_color; then
+        tput setaf 1; echo "$1"; tput sgr0
+    else
+        echo "$1"
+    fi
+}
+
+###########################################
+# AWS Utilities
+###########################################
+setup_aws() {
+    print_green "Initializing AWS CLI profile '${AWS_PROFILE}'..."
+
+    export AWS_PROFILE="${AWS_PROFILE}"
+
+    # Accept EITHER auth style on the profile:
+    #   - static access key  (CI path: login_with_assume_role writes one), or
+    #   - SSO config          (local path: z_deploy_*_from_local.sh configures it).
+    if ! aws configure get aws_access_key_id --profile "${AWS_PROFILE}" &>/dev/null \
+       && ! aws configure get sso_start_url --profile "${AWS_PROFILE}" &>/dev/null; then
+        print_red "AWS profile '${AWS_PROFILE}' is not configured. Run: aws configure --profile ${AWS_PROFILE}"
+        exit 2
+    fi
+
+    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text 2>/dev/null)
+    if [[ -z "$AWS_ACCOUNT_ID" ]]; then
+        print_red "Failed to retrieve AWS account ID. Check your AWS credentials."
+        exit 1
+    fi
+
+    print_green "AWS profile '${AWS_PROFILE}' is valid (account ${AWS_ACCOUNT_ID})."
+}

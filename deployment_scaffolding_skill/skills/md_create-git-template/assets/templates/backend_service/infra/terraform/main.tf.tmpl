@@ -1,0 +1,63 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+
+  # S3 backend. Left EMPTY on purpose: the bucket / key / region / profile are
+  # injected at `terraform init` time by infra/deploy_utils.sh via
+  # -backend-config=... (bucket = terraform-<env>-<deployment_tenant_profile>-state,
+  # key = <project>/<env>/terraform.tfstate). Keeps one state shared by local + CI.
+  backend "s3" {
+
+  }
+}
+
+provider "aws" {
+  region  = var.aws_region
+  # Credentials pointer only. The deploy scripts always (re)create this named
+  # profile before terraform runs, so it is required and guaranteed to exist.
+  profile = var.aws_profile
+}
+
+data "aws_caller_identity" "current" {}
+
+# Common environment variables handed to the service compute. Everything here
+# comes from the deploy-time tfvars (populated by z_setup_deploy_*.sh) — never
+# hardcoded. Extend as your service grows (table names, queue ARNs, etc.).
+locals {
+  common_environment_variables = {
+    PROJECT_NAME              = var.project_name
+    ENVIRONMENT               = var.environment
+    DEPLOYMENT_TENANT_PROFILE = local.tenant_suffix
+  }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVICE COMPUTE — DEFINE THIS.
+#
+# This is a SKELETON. Replace the placeholder below with the compute that runs
+# your service. Common shapes:
+#   * Lambda (zip)        — the ./lambdas module here (reads ../../lambda_package.zip)
+#   * Lambda (container)  — package_type = "Image", image_uri = var.service_image_uri
+#   * ECS / Fargate       — aws_ecs_service + task definition using var.service_image_uri
+#   * App Runner          — aws_apprunner_service using var.service_image_uri
+#
+# The example below wires the generic ./lambdas module as a starting point. It
+# names the function from `prefix` (= "${environment}_${project_name}"), scopes
+# its IAM to this deployment's own resources by ARN prefix, and reads the zip the
+# deploy builds. Delete/replace it with your real compute.
+# ─────────────────────────────────────────────────────────────────────────────
+module "service_compute" {
+  source               = "./lambdas"
+  lambda_name          = "${substr(var.prefix, 0, 30)}_service"
+  handler              = "handler.lambda_handler" # define your entrypoint
+  runtime              = "python3.10"
+  file_path            = "${path.module}/../../lambda_package.zip"
+  environment_variables = local.common_environment_variables
+  aws_profile          = var.aws_profile
+  aws_region           = var.aws_region
+  resource_name_prefix = var.prefix
+}

@@ -1,0 +1,90 @@
+#!/bin/bash
+set -x
+set -e
+
+# Build the wheel and publish to the PROD S3 bucket.
+
+# ----------------------------------------------------------------------------
+# PROD IS CI-ONLY. Production must never be published from a developer machine.
+# This script is invoked by the pipeline's DeployToProd stage; running it
+# anywhere else is disallowed. The guard runs BEFORE any AWS login below, so a
+# local invocation fails immediately and does no AWS work.
+#
+# Azure Pipelines sets TF_BUILD=True on every agent; that is the CI signal.
+# ----------------------------------------------------------------------------
+require_ci_for_prod() {
+    case "${TF_BUILD:-}" in
+        [Tt]rue) return 0 ;;
+    esac
+    echo "ERROR: production deploys are CI-only and must not run from local." >&2
+    echo "       This script runs only in the pipeline (DeployToProd)." >&2
+    echo "       To ship to prod, push and let the pipeline deploy." >&2
+    exit 1
+}
+require_ci_for_prod
+
+# Single source of truth for project constants.
+source "$(dirname "${BASH_SOURCE[0]}")/project_constants.sh"
+
+# Source utility functions
+source ./infra/utils.sh
+source ./infra/provider_login.sh
+
+login_with_assume_role "$PROD_BACKEND_AWS_ACCESS_KEY" "$PROD_BACKEND_AWS_SECRET_KEY"
+
+setup_environment_prod() {
+    export VENV_NAME="${TENANT_NAME}_venv"
+    export stage="PROD"
+    export STAGE_LOWER="prod"
+    export SERVICE_NAME="$PROJECT_NAME"
+    # Throwaway CLI credentials pointer (never names persisted resources).
+    PROFILE="${PARAM_PROFILE_NAME:-${temporary_aws_profile_name}}"
+    export temporary_aws_profile_name="$PROFILE"
+    export AWS_PROFILE="$PROFILE"
+    export AWS_REGION="__DEPLOY_REGION_PROD__"
+
+    # Copy the prod environment file to env_export.sh if it exists
+    if [ -f z_prod_url_env ]; then
+        cp z_prod_url_env env_export.sh
+    fi
+
+    setup_venv
+}
+
+main() {
+    setup_environment_prod
+    setup_aws
+
+    # Persisted-resource identity must be set before we name/touch any bucket.
+    require_deployment_tenant_profile
+    export S3_UPLOAD_BUCKET="$(s3_upload_bucket_name "$STAGE_LOWER")"
+
+    # Clean the environment
+    ./infra/z_clean.sh
+
+    # Get the current version
+    VERSION=$(get_version)
+    echo "Building and publishing production version $VERSION..."
+
+    # Build the wheel
+    build_package
+
+    # Create the S3 bucket if it doesn't exist
+    create_s3_bucket_if_not_exists "$S3_UPLOAD_BUCKET" "$AWS_REGION"
+
+    # Upload to S3
+    if upload_to_s3 "$S3_UPLOAD_BUCKET" "$VERSION" "$PACKAGE_NAME"; then
+        echo "Production version $VERSION successfully uploaded to S3."
+        display_s3_access_message "$S3_UPLOAD_BUCKET" "$PACKAGE_NAME"
+
+        echo "To install this private package, use:"
+        echo "pip3 install https://${S3_UPLOAD_BUCKET}.s3.amazonaws.com/${PACKAGE_NAME}-${VERSION}-py3-none-any.whl"
+    else
+        echo "Failed to upload production version $VERSION to S3."
+        exit 1
+    fi
+
+    echo "Production build and publish completed successfully!"
+}
+
+main "$@"

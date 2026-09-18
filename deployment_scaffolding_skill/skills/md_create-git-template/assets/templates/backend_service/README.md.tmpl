@@ -1,0 +1,79 @@
+# backend_service (skeleton)
+
+Scaffolding for a **deployed** Python service — one that RUNS as compute
+(containerized on ECS/App Runner, or a Lambda), as opposed to a library that is
+published as a package. Modeled on the canonical `RegistrationService` deploy
+flow.
+
+## What it deploys
+
+```
+build the service artifact  →  terraform apply the service infra  →  done
+   (container image → ECR,        (S3-backed state, provider, the
+    or a Lambda zip)               compute resource + its IAM)
+```
+
+The terraform here is a **minimal skeleton**. `infra/terraform/main.tf` wires a
+placeholder compute (the generic `./lambdas` module) and is clearly marked
+`SERVICE COMPUTE — DEFINE THIS`: replace it with your real compute (Lambda-zip,
+Lambda-container, ECS/Fargate, or App Runner — sketches in the comment). Likewise
+`build_service_artifact()` in `infra/deploy_utils.sh` is a no-op skeleton with
+both the container-image→ECR and the Lambda-zip recipes commented in — pick one.
+
+## The profile model — TWO identities
+
+Do not conflate these (full detail in `TOKENS.md`):
+
+- **Throwaway CLI profile** — `temporary_aws_profile_name` (= `${PROJECT_NAME}`),
+  exported as `AWS_PROFILE`. A credentials pointer only (the AWS CLI forces
+  `--profile`); the assumed-role session is written into it; terraform uses it. It
+  MUST NEVER name a persisted resource. Its SOURCE is **`PROFILE`** — the login/SSO
+  identity (folder-name SSO profile locally; base creds that assume the deploy role
+  in CI).
+- **`deployment_tenant_profile`** (`__DEPLOYMENT_TENANT_PROFILE__`) — the ONE
+  persisted-resource identity: names the shared terraform state bucket
+  (`terraform-<env>-<deployment_tenant_profile>-state`) AND the lowercased suffix on
+  every resource name. Independent of the CLI/login profile so local and CI share
+  one state. **NO DEFAULT** — an unset value fails the deploy loudly (stderr + exit
+  1) before any AWS action.
+
+Account ids live ONLY in `infra/aws_account_config.sh`; `assert_aws_account` gates
+every deploy against the correct account.
+
+## z_ script order
+
+Local deploy (beta):
+1. `./z_deploy_beta_from_local.sh` — configures + SSO-logs-in the folder-named
+   profile, verifies the account, then calls →
+2. `z_setup_deploy_beta.sh` — sets `PROFILE` (login source) /
+   `temporary_aws_profile_name` (throwaway CLI profile) / `deployment_tenant_profile`
+   (persisted-resource identity, no default), authenticates
+   (`login_with_assume_role`), asserts the account, then runs `deploy` (from
+   `infra/deploy_utils.sh`): build artifact → validate `deployment_tenant_profile` →
+   ensure S3 backend → `terraform init/plan/apply`.
+
+Prod deploy: `z_setup_deploy_prod.sh` (same shape; run in CI after beta succeeds,
+or locally with an SSO session in the prod account).
+
+Tests: `z_setup_run_functional_tests.sh` — venv + `requirements_<env>.txt` +
+`unittest discover` (skeleton; wire in your `src/` and `test/`).
+
+CI: `pipelines/azure-pipelines.yml` runs beta then prod, injecting the CI base
+creds from the variable group.
+
+## Layout
+
+```
+infra/aws_account_config.sh   single source of truth for account ids + assert gate
+infra/provider_login.sh       SSO (local) / assume-role (CI) auth
+infra/deploy_utils.sh         artifact build + S3 backend + terraform apply flow
+infra/terraform/              main.tf (provider + s3 backend + placeholder compute),
+                              variables.tf, naming.tf, outputs.tf, lambdas/ module
+z_deploy_beta_from_local.sh   local SSO entrypoint
+z_setup_deploy_beta.sh        beta deploy entrypoint
+z_setup_deploy_prod.sh        prod deploy entrypoint
+z_setup_run_functional_tests.sh   test gate
+pipelines/azure-pipelines.yml CI (beta → prod)
+Dockerfile                    minimal service image skeleton
+requirements_{beta,prod}.txt  per-env deps (skeleton)
+```

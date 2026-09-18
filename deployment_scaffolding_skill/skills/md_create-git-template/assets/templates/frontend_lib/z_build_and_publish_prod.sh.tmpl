@@ -1,0 +1,101 @@
+#!/bin/bash
+# PROD build & publish for __PROJECT_NAME__ (JS/TS library).
+#   npm install/ci -> npm run build -> npm pack -> upload .tgz to public S3.
+# set -x  # Uncomment for debugging
+set -e
+
+# ----------------------------------------------------------------------------
+# PROD IS CI-ONLY. Production must never be published from a developer machine.
+# This script is invoked by the pipeline's DeployToProd stage. The guard runs
+# BEFORE any AWS login below, so a local invocation fails immediately.
+#
+# Azure Pipelines sets TF_BUILD=True on every agent; that is the CI signal.
+# ----------------------------------------------------------------------------
+require_ci_for_prod() {
+    case "${TF_BUILD:-}" in
+        [Tt]rue) return 0 ;;
+    esac
+    echo "ERROR: production publishes are CI-only and must not run from local." >&2
+    echo "       This script runs only in the pipeline (DeployToProd)." >&2
+    echo "       To ship to prod, push and let the pipeline publish." >&2
+    exit 1
+}
+require_ci_for_prod
+
+setup_environment_prod() {
+    # tenant_name is BRANDING ONLY. It must never name a persisted resource.
+    export tenant_name="${TENANT_NAME:-__TENANT_NAME__}"
+    export stage="PROD"
+    export SERVICE_NAME=$(basename "$PWD" | tr '[:upper:]' '[:lower:]')
+    export ENVIRONMENT=${stage}
+    export PROJECT_NAME=${SERVICE_NAME}
+
+    # ─── THROWAWAY CLI PROFILE ───
+    # The AWS CLI forces --profile, so we need a credentials pointer. This profile
+    # is created/deleted, its value may change run-to-run, and it MUST NEVER name
+    # any persisted resource. CI assumes the deploy role and writes the session
+    # into this profile. Named after the project folder so it is identical
+    # locally and in the pipeline.
+    export temporary_aws_profile_name="${PROJECT_NAME}"
+    export AWS_PROFILE="${temporary_aws_profile_name}"
+
+    # ─── PERSISTED-RESOURCE IDENTITY (no default — fail loud) ───
+    # Stable tenant identity that owns PERSISTED resources (the publish buckets).
+    # NOTHING persisted may be named from the throwaway profile or any changing
+    # value. The bucket names are explicit __PACKAGE_S3_BUCKET_*__ tokens; this
+    # identity is asserted so the throwaway/branding values are never used for it.
+    export deployment_tenant_profile="__DEPLOYMENT_TENANT_PROFILE__"
+    require_deployment_tenant_profile
+
+    export TENANT_LOWER=$(echo "${tenant_name}" | tr '[:upper:]' '[:lower:]')
+    export PROJECT_NAME_LOWER=$(echo "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')
+    export STAGE_LOWER=$(echo "${stage}" | tr '[:upper:]' '[:lower:]')
+}
+
+# AWS configuration
+export AWS_REGION="__DEPLOY_REGION_PROD__"
+export PACKAGE_NAME="__PACKAGE_NAME__"
+export S3_UPLOAD_BUCKET="__PACKAGE_S3_BUCKET_PROD__"
+
+# Source helpers
+source ./infra/utils.sh
+source ./infra/provider_login.sh
+
+main() {
+    # Establish the throwaway profile + assert the persisted identity FIRST, so
+    # the auth step below writes the session into temporary_aws_profile_name.
+    setup_environment_prod
+
+    login_with_assume_role "$FRONTEND_LIB_PROD_AWS_ACCESS_KEY" "$FRONTEND_LIB_PROD_AWS_SECRET_KEY"
+    setup_aws
+
+    # Clean previous artifacts.
+    ./infra/z_clean.sh
+
+    VERSION=$(get_version)
+    PACKAGE_NAME=$(get_package_name)
+    echo "Building and publishing production version $VERSION of $PACKAGE_NAME..."
+
+    # Build the library.
+    build_package
+
+    # Produce the publishable tarball.
+    TARBALL=$(pack_package) || { echo "Pack failed."; exit 1; }
+    echo "Packed artifact: $TARBALL"
+
+    # Ensure the public-read bucket exists.
+    create_s3_bucket_if_not_exists "$S3_UPLOAD_BUCKET"
+
+    # Upload and print the install URL.
+    if URL=$(upload_to_s3 "$S3_UPLOAD_BUCKET" "$TARBALL" "$PACKAGE_NAME"); then
+        echo "Production version $VERSION successfully uploaded: $URL"
+        display_s3_access_message "$S3_UPLOAD_BUCKET" "$(basename "$TARBALL")" "$PACKAGE_NAME"
+    else
+        echo "Failed to upload production version $VERSION to S3."
+        exit 1
+    fi
+
+    echo "Production build and publish completed successfully!"
+}
+
+main "$@"

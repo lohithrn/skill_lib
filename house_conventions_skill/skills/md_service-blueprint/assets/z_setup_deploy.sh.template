@@ -1,0 +1,51 @@
+#!/bin/bash
+# z_setup_deploy_beta.sh   (copy to z_setup_deploy_prod.sh, flip beta->prod)
+#
+# Self-contained deploy entrypoint. ONE command does everything: log in, assert
+# the account, gate on tests, build, terraform apply, print the URL. Never asks
+# the user to run anything first.
+set -x
+set -e
+set -o pipefail
+
+# ── Deploy-time configuration. All overridable via env, all with sane defaults,
+#    NOTHING hardcoded into terraform. ────────────────────────────────────────
+export PROFILE="${PARAM_PROFILE_NAME:-REPLACE_DEFAULT_PROFILE}"
+export ENVIRONMENT="beta"
+export REGION="${REGION:-us-west-2}"
+# Company that owns this deployment: flows here -> create_tfvars -> the terraform
+# company_name var -> the lowercased suffix on every resource name.
+export COMPANY_NAME="${COMPANY_NAME:-REPLACE_COMPANY}"
+
+# ── Utilities + account single-source-of-truth + login. ──────────────────────
+source infra/deploy_utils.sh
+source infra/provider_login.sh   # sources aws_account_config.sh (assert_aws_account)
+
+# Sign in INSIDE the script (SSO or assume-role). Do not ask the user to do this.
+# Credentials arrive from the environment or the CI secret store; never from a
+# file in the repo, and never from a certificate or keypair minted for the purpose.
+login_with_assume_role "$DEPLOY_AWS_ACCESS_KEY" "$DEPLOY_AWS_SECRET_KEY"
+
+# ── Final gate before any AWS mutation: right credentials -> right account. ──
+assert_aws_account "$PROFILE" "$ENVIRONMENT"
+
+# ── Gate the build on the unit tests: set up the virtualenv, resolve
+#    requirements, run the full suite BEFORE the zip is created. set -e => a
+#    failing test aborts the deploy instead of shipping it. ──────────────────
+echo "Running all unit tests..."
+source z_setup_run_functional_tests.sh
+
+# ── Deploy. Evaluate terraform apply's exit code EXPLICITLY and make it this
+#    script's exit status — a failed apply can never be reported as success. ────
+deploy "$PROFILE" "$ENVIRONMENT" "$REGION"
+deploy_status=$?
+if [ "$deploy_status" -ne 0 ]; then
+    echo "${ENVIRONMENT} deploy FAILED (terraform apply exit ${deploy_status})." >&2
+    exit "$deploy_status"
+fi
+
+# ── Print the real, resolved public URL (never a placeholder). ───────────────
+print_public_url "$ENVIRONMENT" "$REGION"
+
+echo "${ENVIRONMENT} deploy succeeded."
+exit 0

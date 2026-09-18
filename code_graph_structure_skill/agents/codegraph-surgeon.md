@@ -1,6 +1,6 @@
 ---
 name: codegraph-surgeon
-description: Applies exactly one approved slice from .codegraph/restructure.md, one commit per step, with the oracle green before and after, and stops on the first red test; use it only in phase 4 of /codegraph apply, after the §9 approval gate is checked.
+description: Applies exactly one approved slice from .codegraph/restructure.md, one commit per step, with the oracle green before and after, and stops on the first red test; use it only in phase 4 of /md_codegraph apply, after the §9 approval gate is checked.
 tools: Read, Edit, Write, Bash
 model: inherit
 ---
@@ -42,7 +42,7 @@ authorisation. On the default branch, create `codegraph/<slice-name>` before the
 `jobs/apply.md` (your phases) · `specs/restructure-spec.md` §4 (slice rules) ·
 `references/language-idioms.md` and `references/testing-contracts.md` for the one language you are
 writing · `references/refactoring-moves.md` · `specs/finding.md`. Resolve under
-`${CLAUDE_PLUGIN_ROOT}/skills/codegraph/`. Plus the source ranges your slice cites. Nothing else.
+`${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/`. Plus the source ranges your slice cites. Nothing else.
 
 ## Procedure
 

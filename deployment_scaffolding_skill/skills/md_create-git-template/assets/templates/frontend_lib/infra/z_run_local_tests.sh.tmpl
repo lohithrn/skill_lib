@@ -1,0 +1,21 @@
+#!/bin/bash
+# Run tests for __PROJECT_NAME__ (JS/TS library) before publishing.
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+cd "$PROJECT_ROOT"
+
+if ! command -v npm >/dev/null 2>&1; then
+    echo "Error: npm is not installed."
+    exit 1
+fi
+
+# Run the "test" script only if the package defines one; otherwise no-op so a
+# library without tests still publishes.
+if npm run | grep -qE '^  test'; then
+    echo "Running tests..."
+    npm test
+else
+    echo "No 'test' script in package.json — skipping tests."
+fi

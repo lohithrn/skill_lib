@@ -1,0 +1,46 @@
+#!/bin/bash
+set -x
+set -e
+set -o pipefail
+
+# Set up a venv, install this environment's deps, and run the unit test suite.
+# Sourced by the deploy scripts (before the artifact is built) to gate the deploy
+# on tests, or runnable standalone. SKELETON: wire in your own src/ + test/ layout.
+
+if [ -f ".venv/bin/activate" ]; then
+    echo "Activating virtual environment..."
+    source .venv/bin/activate
+else
+    echo "Virtual environment not found. Creating and setting it up..."
+    python3 -m venv .venv
+    source .venv/bin/activate
+fi
+
+export AWS_REGION="${AWS_REGION:-__DEPLOY_REGION_BETA__}"
+# Throwaway CLI profile (credentials pointer only) = project name, matching the
+# deploy scripts. PROFILE is the login/source identity from PARAM_PROFILE_NAME.
+export PROJECT_NAME="$(basename "$PWD")"
+export PROFILE="${PARAM_PROFILE_NAME:-$PROJECT_NAME}"
+export temporary_aws_profile_name="${PROJECT_NAME}"
+export AWS_PROFILE="${temporary_aws_profile_name}"
+export ENVIRONMENT="${ENVIRONMENT:-beta}"
+export PYTHONBREAKPOINT="pdb.set_trace"
+
+# Per-environment requirements so beta/prod can pin different deps. Create these
+# files with your service's dependencies (a tiny placeholder ships in the template).
+if [ -f "requirements_${ENVIRONMENT}.txt" ]; then
+    pip3 install -r "requirements_${ENVIRONMENT}.txt"
+else
+    echo "No requirements_${ENVIRONMENT}.txt found — skipping dependency install (skeleton)."
+fi
+
+# Make src/ and test/ importable.
+export PYTHONPATH="${PWD}/src:${PWD}/test:./src:./test"
+
+echo "Running all unit tests..."
+if [ -d test ]; then
+    python3 -m unittest discover -s test -p "test_*.py" -v
+    echo "✅ All tests passed successfully!"
+else
+    echo "No test/ directory found — nothing to run (skeleton). Add your tests under test/."
+fi

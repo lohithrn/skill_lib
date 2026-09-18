@@ -1,6 +1,6 @@
 ---
 name: codegraph-adversary
-description: Attacks one /codegraph claim at a time — a finding or a draft slice — and returns a per-claim verdict of CONFIRMED, REFUTED, or UNCLEAR with the evidence that settles it; use it in phase 1c and phase 3, never to edit code.
+description: Attacks one /md_codegraph claim at a time — a finding or a draft slice — and returns a per-claim verdict of CONFIRMED, REFUTED, or UNCLEAR with the evidence that settles it; use it in phase 1c and phase 3, never to edit code.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -40,7 +40,7 @@ No prose outside the block. One block per claim. In spec mode the single questio
 `references/refine-loop.md` §4 (the schema and the thresholds) · `specs/finding.md` (the seven
 fields and §"Automatic non-findings") · `references/smells.md` §6 (what is not a finding) · the
 one reference file the claim's LAW field cites, to check the law was quoted correctly. Resolve
-under `${CLAUDE_PLUGIN_ROOT}/skills/codegraph/`. Do not read `.codegraph/report.md`, another
+under `${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/`. Do not read `.codegraph/report.md`, another
 adversary's verdict, or the architect's rationale.
 
 ## Procedure

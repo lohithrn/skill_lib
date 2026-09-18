@@ -1,0 +1,127 @@
+name: __PROJECT_NAME__
+
+trigger: none # Can be configured for CI/CD triggers as needed
+pr: none
+
+variables: # Pipeline-level variables
+  # Variable group holding the CI deploy access keys (see below). Rename to your
+  # group. The keys inside it are consumed by the z_setup_deploy_* scripts.
+  - group: __DEPLOYMENT_TENANT_PROFILE__
+  - name: DOCKER_IMAGE
+    value: "docker.io/<registry-org>/<ci-deploy-image>:latest"
+
+parameters:
+  # The LOGIN/SSO source profile name (→ PARAM_PROFILE_NAME → PROFILE). In CI the
+  # static base creds drive assume-role, so this is nominal; kept configurable.
+  - name: profile_name
+    type: string
+    displayName: "Profile Name"
+    default: "__DEPLOYMENT_TENANT_PROFILE__"
+
+stages:
+- stage: DeployAndTestBeta
+  displayName: 'Deploy and Test Beta'
+  jobs:
+  - job: betaDeploymentJob
+    displayName: 'Deploy to Beta and Test'
+    pool:
+      vmImage: 'ubuntu-latest'
+    container:
+      image: ${{ variables.DOCKER_IMAGE }}
+      options: --platform linux/amd64
+    variables:
+      PARAM_PROFILE_NAME: ${{ parameters.profile_name }}
+      BETA_AWS_REGION: '__DEPLOY_REGION_BETA__'
+    steps:
+      - checkout: self
+        fetchDepth: "0"
+        clean: "true"
+        path: "s/$(Build.Repository.Name)"
+
+      - bash: |
+          set -e
+          set -x
+          echo "################################### STEP 0: Directory Check #################################################"
+          ls -la
+          pwd
+          if [[ $(pwd) != */"$REPOSITORY_NAME" ]]; then
+            echo "Error: Not in $REPOSITORY_NAME directory"
+            exit 1
+          fi
+        displayName: 'Step 0: Directory Check (Beta)'
+        workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+        env:
+          REPOSITORY_NAME: "$(Build.Repository.Name)"
+      - bash: |
+          set -e
+          set -x
+          pwd
+          ls -l
+          echo "Deploying to Beta Environment..."
+          chmod +x z_setup_deploy_beta.sh
+          ./z_setup_deploy_beta.sh
+          echo "Successfully deployed to Beta environment"
+          echo "##vso[task.setvariable variable=BETA_DEPLOYED_SHA;isOutput=true]$(Build.SourceVersion)"
+        displayName: 'Deploy to Beta Environment'
+        workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+        env:
+          # CI base creds used by login_with_assume_role to assume the beta deploy
+          # role. Map these to the secrets in your variable group.
+          BETA_BACKEND_AWS_ACCESS_KEY: $(BETA_BACKEND_AWS_ACCESS_KEY)
+          BETA_BACKEND_AWS_SECRET_KEY: $(BETA_BACKEND_AWS_SECRET_KEY)
+
+- stage: DeployToProd
+  displayName: 'Deploy to Production'
+  dependsOn: DeployAndTestBeta
+  condition: succeeded('DeployAndTestBeta')
+  variables:
+    TARGET_PROD_COMMIT_SHA: $[ stageDependencies.DeployAndTestBeta.betaDeploymentJob.outputs['Deploy to Beta Environment.BETA_DEPLOYED_SHA'] ]
+
+  jobs:
+  - deployment: ProductionDeployment
+    displayName: 'Deploy to Production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    container:
+      image: ${{ variables.DOCKER_IMAGE }}
+      options: --platform linux/amd64
+    environment:
+      name: 'prod'
+    variables:
+      PARAM_PROFILE_NAME: ${{ parameters.profile_name }}
+      PROD_AWS_REGION: '__DEPLOY_REGION_PROD__'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              fetchDepth: "0"
+              clean: "true"
+              path: "s/$(Build.Repository.Name)"
+              displayName: 'Checkout Repository'
+
+            - bash: |
+                set -e
+                set -x
+                echo "################################### STEP 0: Directory Check (Prod) #################################################"
+                ls -la
+                pwd
+                if [[ $(pwd) != */"$REPOSITORY_NAME" ]]; then
+                  echo "Error: Not in $REPOSITORY_NAME directory"
+                  exit 1
+                fi
+              displayName: 'Step 0: Directory Check (Prod)'
+              workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+              env:
+                REPOSITORY_NAME: "$(Build.Repository.Name)"
+
+            - bash: |
+                echo "Deploying to Production..."
+                chmod +x z_setup_deploy_prod.sh
+                ./z_setup_deploy_prod.sh
+                echo "Successfully deployed to Production"
+              displayName: 'Deploy to Production'
+              workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+              env:
+                PROD_BACKEND_AWS_ACCESS_KEY: $(PROD_BACKEND_AWS_ACCESS_KEY)
+                PROD_BACKEND_AWS_SECRET_KEY: $(PROD_BACKEND_AWS_SECRET_KEY)

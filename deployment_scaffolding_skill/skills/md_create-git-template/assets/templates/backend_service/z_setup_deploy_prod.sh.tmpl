@@ -1,0 +1,44 @@
+#!/bin/bash
+set -x
+set -e
+set -o pipefail
+
+# ─── Identity model (see z_setup_deploy_beta.sh for the full explanation) ───
+# PROFILE                    = LOGIN / SSO source profile (how we authenticate).
+# temporary_aws_profile_name = throwaway CLI profile (= ${PROJECT_NAME}); the
+#                              assumed-role session is written into it; terraform
+#                              uses it; NEVER names a resource.
+# deployment_tenant_profile  = persisted-resource identity (state bucket + every
+#                              resource-name suffix). NO DEFAULT — unset fails loud.
+export PROJECT_NAME="$(basename "$PWD")"
+export PROFILE="${PARAM_PROFILE_NAME:-$PROJECT_NAME}"
+export ENVIRONMENT="prod"
+export REGION=${4:-"__DEPLOY_REGION_PROD__"}
+
+export temporary_aws_profile_name="${PROJECT_NAME}"
+export AWS_PROFILE="${temporary_aws_profile_name}"
+
+# Persisted-resource identity — NO silent fallback (see deploy() fail-loud check).
+export deployment_tenant_profile="${deployment_tenant_profile:-__DEPLOYMENT_TENANT_PROFILE__}"
+
+# Source the utility functions + auth helpers.
+source infra/deploy_utils.sh
+source infra/provider_login.sh
+
+# Authenticate (CI: assume the prod backend deploy role from the static base
+# creds, writing the session into temporary_aws_profile_name; local: reuse the SSO
+# session). Rename the CI secret vars if needed.
+login_with_assume_role "$PROD_BACKEND_AWS_ACCESS_KEY" "$PROD_BACKEND_AWS_SECRET_KEY"
+
+# Final gate before any AWS mutation.
+assert_aws_account "$temporary_aws_profile_name" "$ENVIRONMENT"
+
+# Run the deployment; propagate terraform apply's exit status as ours.
+deploy "$temporary_aws_profile_name" "$ENVIRONMENT" "$REGION"
+deploy_status=$?
+if [ "$deploy_status" -ne 0 ]; then
+    echo "PROD deploy FAILED (terraform apply exit ${deploy_status})." >&2
+    exit "$deploy_status"
+fi
+echo "PROD deploy succeeded."
+exit 0

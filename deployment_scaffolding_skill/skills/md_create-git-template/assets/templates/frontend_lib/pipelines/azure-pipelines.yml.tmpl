@@ -1,0 +1,121 @@
+name: __PROJECT_NAME__
+
+trigger: none # Configure CI/CD triggers as needed
+pr: none
+
+variables:
+  - group: __TENANT_NAME__
+  - name: DOCKER_IMAGE
+    value: "docker.io/<registry-org>/<ci-deploy-image>:latest"
+
+parameters:
+  - name: profile_name
+    type: string
+    displayName: "Profile Name"
+    default: "__PROJECT_NAME__"
+
+stages:
+- stage: DeployAndTestBeta
+  displayName: 'Build, Test and Publish Beta'
+  jobs:
+  - job: betaPublishJob
+    displayName: 'Build, Test and Publish to Beta'
+    pool:
+      vmImage: 'ubuntu-latest'
+    container:
+      image: ${{ variables.DOCKER_IMAGE }}
+      options: --platform linux/amd64
+    variables:
+      PARAM_PROFILE_NAME: ${{ parameters.profile_name }}
+      BETA_AWS_REGION: '__DEPLOY_REGION_BETA__'
+    steps:
+      - checkout: self
+        fetchDepth: "0"
+        clean: "true"
+        path: "s/$(Build.Repository.Name)"
+
+      - bash: |
+          set -e
+          set -x
+          echo "########## STEP 0: Directory Check (Beta) ##########"
+          ls -la
+          pwd
+          if [[ $(pwd) != */"$REPOSITORY_NAME" ]]; then
+            echo "Error: Not in $REPOSITORY_NAME directory"
+            exit 1
+          fi
+        displayName: 'Step 0: Directory Check (Beta)'
+        workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+        env:
+          REPOSITORY_NAME: "$(Build.Repository.Name)"
+
+      - bash: |
+          set -e
+          set -x
+          echo "Building & publishing Beta artifact..."
+          chmod +x z_build_and_publish_beta.sh
+          ./z_build_and_publish_beta.sh
+          echo "Successfully published Beta artifact"
+          echo "##vso[task.setvariable variable=BETA_DEPLOYED_SHA;isOutput=true]$(Build.SourceVersion)"
+        name: publishBeta
+        displayName: 'Build & Publish Beta'
+        workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+        env:
+          FRONTEND_LIB_BETA_AWS_ACCESS_KEY: $(FRONTEND_LIB_BETA_AWS_ACCESS_KEY)
+          FRONTEND_LIB_BETA_AWS_SECRET_KEY: $(FRONTEND_LIB_BETA_AWS_SECRET_KEY)
+
+- stage: DeployToProd
+  displayName: 'Publish to Production'
+  dependsOn: DeployAndTestBeta
+  condition: succeeded('DeployAndTestBeta')
+  jobs:
+  - deployment: ProductionPublish
+    displayName: 'Publish to Production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    container:
+      image: ${{ variables.DOCKER_IMAGE }}
+      options: --platform linux/amd64
+    environment:
+      name: 'prod'
+      # Configure this environment in Azure DevOps with approval checks.
+    variables:
+      PARAM_PROFILE_NAME: ${{ parameters.profile_name }}
+      PROD_AWS_REGION: '__DEPLOY_REGION_PROD__'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              fetchDepth: "0"
+              clean: "true"
+              path: "s/$(Build.Repository.Name)"
+              displayName: 'Checkout Repository'
+
+            - bash: |
+                set -e
+                set -x
+                echo "########## STEP 0: Directory Check (Prod) ##########"
+                ls -la
+                pwd
+                if [[ $(pwd) != */"$REPOSITORY_NAME" ]]; then
+                  echo "Error: Not in $REPOSITORY_NAME directory"
+                  exit 1
+                fi
+              displayName: 'Step 0: Directory Check (Prod)'
+              workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+              env:
+                REPOSITORY_NAME: "$(Build.Repository.Name)"
+
+            - bash: |
+                set -e
+                set -x
+                echo "Building & publishing Production artifact..."
+                chmod +x z_build_and_publish_prod.sh
+                ./z_build_and_publish_prod.sh
+                echo "Successfully published Production artifact"
+              displayName: 'Build & Publish Production'
+              workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+              env:
+                FRONTEND_LIB_PROD_AWS_ACCESS_KEY: $(FRONTEND_LIB_PROD_AWS_ACCESS_KEY)
+                FRONTEND_LIB_PROD_AWS_SECRET_KEY: $(FRONTEND_LIB_PROD_AWS_SECRET_KEY)

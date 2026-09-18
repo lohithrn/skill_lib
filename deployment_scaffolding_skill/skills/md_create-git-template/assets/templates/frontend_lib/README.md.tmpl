@@ -1,0 +1,48 @@
+# frontend_lib template
+
+Skeleton for a **JS/TS library** that is built with npm and **published as an
+`npm pack` tarball to a public-read S3 bucket** (versioned), then installed by
+consumers directly from the tarball URL. No web app, no Python/pip/wheel.
+
+## What it publishes
+
+`npm ci` / `npm install` → `npm run build` → `npm pack` → upload
+`<package>-<version>.tgz` (plus a moving `<package>-latest.tgz` alias) to the
+public-read bucket, then print the install URL:
+
+```
+npm install https://<bucket>.s3.amazonaws.com/<package>-<version>.tgz
+```
+
+## Script order
+
+| Script | Runs where | Purpose |
+|--------|-----------|---------|
+| `z_deploy_beta_from_local.sh` | Local dev | SSO login (self-configures profile) → calls the beta publish. Start here to publish beta from your machine. |
+| `z_build_and_publish_beta.sh` | Local (via above) or CI | Assume-role (CI) / SSO (local) → clean → test → build → pack → upload to `__PACKAGE_S3_BUCKET_BETA__`. |
+| `z_build_and_publish_prod.sh` | **CI only** (guarded by `TF_BUILD`) | Same flow → upload to `__PACKAGE_S3_BUCKET_PROD__`. Refuses to run locally. |
+| `pipelines/azure-pipelines.yml` | ADO | DeployAndTestBeta → DeployToProd (prod behind an approval environment). |
+
+## Two AWS identities
+
+- **`temporary_aws_profile_name = ${PROJECT_NAME}` (throwaway).** Just the AWS
+  CLI credentials pointer (`--profile` is mandatory). Created/deleted, may change
+  run-to-run — CI assumes the deploy role into it, local SSO logs into it. Never
+  names a persisted resource.
+- **`deployment_tenant_profile = __DEPLOYMENT_TENANT_PROFILE__` (persisted).** The
+  stable identity that owns persisted resources (the S3 publish buckets). **No
+  default** — the scripts fail loudly (`require_deployment_tenant_profile`) if it
+  is empty or unreplaced. `tenant_name`/`__TENANT_NAME__` is branding only and is
+  never used to name a bucket.
+
+## Layout
+
+```
+infra/provider_login.sh   assume-role (CI) + SSO (local) auth helpers
+infra/utils.sh            npm build, npm pack, S3 bucket + upload, install URL
+infra/z_clean.sh          remove dist/build/*.tgz
+infra/z_run_local_tests.sh  npm test (no-op if none)
+package.json              minimal tokenized skeleton (name, version, build)
+```
+
+See `TOKENS.md` for every `__TOKEN__` and the CI secret variable names.

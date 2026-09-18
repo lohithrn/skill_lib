@@ -1,0 +1,55 @@
+# infra/terraform/naming.tf
+#
+# Single source of truth for resource naming.
+#
+# Every resource in this service is named `<prefix>_<resource_role>_<company>`:
+#   - prefix          = "${environment}_${project_name}" (var.prefix, derived from the
+#                       repo folder name at deploy time — NEVER hardcoded)
+#   - resource_role   = the per-resource descriptive middle, snake_case, specific
+#                       (e.g. "universal_tenant_admin_cognito_pool")
+#   - company_suffix  = the owning company, lowercased (COMPANY_NAME from the deploy
+#                       scripts -> var.company_name)
+#
+# Centralizing composition here keeps each resource file referencing one local
+# instead of re-spelling the prefix/suffix rule, so a change to the naming
+# convention happens in exactly one place.
+locals {
+  # Company suffix, lowercased. AWS resource names are case-sensitive; the
+  # convention requires lowercase regardless of how COMPANY_NAME is spelled.
+  company_suffix = lower(var.company_name)
+
+  # Full resource names. One entry per AWS resource this service owns.
+  # Name the role specifically and include a type word so the purpose is obvious.
+  #
+  # Examples (replace with this service's real resources):
+  example_records_table_name   = "${var.prefix}_example_records_${local.company_suffix}"
+  example_events_topic_name    = "${var.prefix}_example_events_${local.company_suffix}"
+  example_config_secret_name   = "${var.prefix}_example_config_secret_${local.company_suffix}"
+  example_api_waf_web_acl_name = "${var.prefix}_example_api_waf_web_acl_${local.company_suffix}"
+  example_usage_role_name      = "${var.prefix}_example_model_usage_role_${local.company_suffix}"
+}
+
+# Names in the three 64-character namespaces (IAM roles, lambda function names,
+# scheduler groups) must be asserted at PLAN time — IAM answers a too-long name at
+# apply, after a clean plan, halfway through a deploy:
+#
+#   resource "null_resource" "assert_role_name_lengths" {
+#     lifecycle {
+#       precondition {
+#         condition     = alltrue([for n in values(local.role_names) : length(n) <= 64])
+#         error_message = "An IAM role name exceeds 64 characters. Shorten var.role_slug."
+#       }
+#     }
+#   }
+#
+# Usage in a resource file, e.g. dynamodb_example_records.tf:
+#
+#   resource "aws_dynamodb_table" "example_records" {
+#     name         = local.example_records_table_name
+#     billing_mode = "PAY_PER_REQUEST"   # cheapest default; on-demand
+#     hash_key     = "id"
+#     attribute {
+#       name = "id"
+#       type = "S"
+#     }
+#   }

@@ -1,0 +1,102 @@
+# Generic Lambda module used as the SKELETON service compute (see ../main.tf).
+# Reusable: creates the function, a retention-bounded log group, and an execution
+# role whose service-scoped IAM is bounded to THIS deployment's own resources by
+# ARN prefix (resource_name_prefix). Swap this out if your compute is ECS/etc.
+
+data "aws_caller_identity" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+
+  # Middle-ground permissions: broad actions, but ONLY for THIS service's own
+  # resources, scoped by ARN pattern on the deploy prefix (every resource this
+  # service owns is named `<prefix>_..._<company>` — see ../naming.tf). This
+  # bounds the blast radius to this deployment instead of the whole account.
+  #
+  # SKELETON: the statements below are commented out because the skeleton owns no
+  # tables/queues/secrets yet. Uncomment + adjust the services your compute uses.
+  service_statements = [
+    # {
+    #   actions = ["dynamodb:*"]
+    #   resources = [
+    #     "arn:aws:dynamodb:${var.aws_region}:${local.aws_account_id}:table/${var.resource_name_prefix}_*",
+    #     "arn:aws:dynamodb:${var.aws_region}:${local.aws_account_id}:table/${var.resource_name_prefix}_*/index/*",
+    #   ]
+    # },
+    # {
+    #   actions   = ["secretsmanager:GetSecretValue"]
+    #   resources = ["arn:aws:secretsmanager:${var.aws_region}:${local.aws_account_id}:secret:${var.resource_name_prefix}_*"]
+    # },
+    # {
+    #   actions   = ["sns:Publish"]
+    #   resources = ["arn:aws:sns:${var.aws_region}:${local.aws_account_id}:${var.resource_name_prefix}_*"]
+    # },
+  ]
+}
+
+# Retention-bounded CloudWatch log group (Lambda would otherwise lazily create
+# one with NO expiry). Name MUST match the Lambda's conventional log group.
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/${var.lambda_name}"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_lambda_function" "lambda" {
+  function_name    = var.lambda_name
+  handler          = var.handler
+  role             = aws_iam_role.lambda_role.arn
+  runtime          = var.runtime
+  memory_size      = var.memory_size
+  timeout          = var.timeout
+  filename         = var.file_path
+  source_code_hash = filebase64sha256(var.file_path)
+  tags             = var.tags
+
+  environment {
+    variables = var.environment_variables
+  }
+
+  depends_on = [aws_cloudwatch_log_group.lambda]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_iam_role" "lambda_role" {
+  assume_role_policy = data.aws_iam_policy_document.role_doc.json
+  name               = "${substr(var.lambda_name, 0, 50)}_role"
+}
+
+# AWS-managed basic execution role: just CloudWatch Logs write.
+resource "aws_iam_role_policy_attachment" "basic_execution" {
+  role       = aws_iam_role.lambda_role.id
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Service-scoped permissions, added only when service_statements is non-empty.
+resource "aws_iam_role_policy" "service_access" {
+  count = length(local.service_statements) > 0 ? 1 : 0
+  name  = "ServiceScopedAccessPolicy"
+  role  = aws_iam_role.lambda_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [for s in local.service_statements : {
+      Effect   = "Allow"
+      Action   = s.actions
+      Resource = s.resources
+    }]
+  })
+}
+
+data "aws_iam_policy_document" "role_doc" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      identifiers = ["lambda.amazonaws.com"]
+      type        = "Service"
+    }
+    effect = "Allow"
+    sid    = ""
+  }
+}

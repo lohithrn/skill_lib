@@ -1,6 +1,6 @@
 ---
 name: codegraph-architect
-description: Designs the target structure for one port cluster in phase 2 of /codegraph and returns the §3 port subsections (or the §2 target tree) for the restructure spec; use it to propose, never to edit, since it has no write or shell access.
+description: Designs the target structure for one port cluster in phase 2 of /md_codegraph and returns the §3 port subsections (or the §2 target tree) for the restructure spec; use it to propose, never to edit, since it has no write or shell access.
 tools: Read, Grep, Glob
 model: inherit
 ---
@@ -46,7 +46,7 @@ Required in every §3 subsection, or the subsection is rejected and re-requested
 `references/doctrine.md` (CPRC, §2 promotion threshold) · `references/patterns.md` (§4
 conflict→pattern table, §7 over-application) · `references/architecture.md` ·
 `references/naming.md` · `references/testing-contracts.md` · `specs/restructure-spec.md` §2–§3 ·
-`specs/finding.md`. Resolve under `${CLAUDE_PLUGIN_ROOT}/skills/codegraph/` when no absolute path
+`specs/finding.md`. Resolve under `${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/` when no absolute path
 is given. Plus the source ranges your findings cite. Read nothing else — not the other clusters'
 findings, not another architect's output.
 

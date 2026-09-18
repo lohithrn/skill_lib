@@ -1,0 +1,92 @@
+#!/bin/bash
+# infra/deploy_utils.sh
+#
+# Deploy helpers. The service name is ALWAYS the repo folder name; the prefix is
+# ALWAYS ${environment}_${PROJECT_NAME}. Nothing here is hardcoded per-service —
+# this file is meant to be copied between services unchanged.
+
+# ── Common variables. PROJECT_NAME (folder name) is the single source of truth
+#    for the service name; it flows into tfvars project_name/prefix and thus into
+#    every resource name and the API Gateway URL prefix. ─────────────────────────
+init_deployment_vars() {
+    local profile=$1 environment=$2 region=$3
+
+    PROJECT_NAME=$(basename "$(pwd)")   # NEVER hardcode the service name.
+    echo "Deploying project: ${PROJECT_NAME}"
+    echo "Environment: ${environment}"
+    echo "AWS Profile: ${profile}"
+    echo "AWS Region: ${region}"
+
+    TEMP_TF_PATH="$(pwd)/infra/terraform/.terraform"
+    LOCAL_TF_PLAN="${TEMP_TF_PATH}/${PROJECT_NAME}_${environment}.tfplan"
+    mkdir -p "$TEMP_TF_PATH"
+}
+
+# ── Create the tfvars. Everything derived from folder name + environment. ────
+create_tfvars() {
+    local profile=$1 environment=$2 region=$3 tfvars_path=$4
+    {
+        echo "project_name = \"${PROJECT_NAME}\""
+        echo "environment  = \"${environment}\""
+        echo "aws_profile  = \"${profile}\""
+        echo "aws_region   = \"${region}\""
+        echo "prefix       = \"${environment}_${PROJECT_NAME}\""
+        echo "company_name = \"${COMPANY_NAME}\""
+    } > "$tfvars_path"
+
+    # Copy the environment-appropriate URL file into the packaged location that
+    # ships inside the zip, so get_url() resolves the right URLs at runtime and
+    # no outbound URL becomes a per-URL lambda environment variable.
+    if [ -f "configuration/urls.${environment}.yaml" ]; then
+        cp "configuration/urls.${environment}.yaml" \
+           "src/deployed_utilities_references/urls.yaml"
+    fi
+}
+
+# ── Terraform: init with a derived backend key, plan, then apply. apply is the
+#    source of truth for success — return ITS exit code, nothing else. ─────────
+run_terraform() {
+    local environment=$1
+    ( cd infra/terraform
+      terraform init -reconfigure \
+        -backend-config="bucket=terraform-${environment}-REPLACE_STATE_BUCKET" \
+        -backend-config="key=${PROJECT_NAME}/${environment}/terraform.tfstate" \
+        -backend-config="region=${REGION}"
+      terraform plan  -var-file="${PROJECT_NAME}.tfvars" -out="$LOCAL_TF_PLAN" || return $?
+      terraform apply -lock=false "$LOCAL_TF_PLAN"        # <- exit code propagates
+    )
+}
+
+# ── Orchestrator. ────────────────────────────────────────────────────────────
+deploy() {
+    local profile=$1 environment=$2 region=$3
+    init_deployment_vars "$profile" "$environment" "$region"
+
+    # build the zip here (resolve dependencies into a package dir, zip src/ + urls.yaml) …
+
+    create_tfvars "$profile" "$environment" "$region" \
+        "infra/terraform/${PROJECT_NAME}.tfvars"
+
+    run_terraform "$environment"
+    local deploy_status=$?
+    if [ "$deploy_status" -ne 0 ]; then
+        echo "Deploy FAILED: terraform apply returned ${deploy_status}." >&2
+        return "$deploy_status"
+    fi
+    return 0
+}
+
+# ── Print the real resolved public URL from terraform outputs. ───────────────
+print_public_url() {
+    local environment=$1 region=$2
+    local url
+    url=$( cd infra/terraform && terraform output -raw public_url 2>/dev/null )
+    if [ -z "$url" ]; then
+        echo "WARNING: no 'public_url' terraform output found — add one to outputs.tf." >&2
+        return 0
+    fi
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo "  ${environment} public URL:  ${url}"
+    echo "────────────────────────────────────────────────────────────"
+}

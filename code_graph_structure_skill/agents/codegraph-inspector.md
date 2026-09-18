@@ -1,6 +1,6 @@
 ---
 name: codegraph-inspector
-description: Inspects one named /codegraph dimension (caps, cond, di, port, test, time, err, dead, or name) against its governing reference file and writes .codegraph/<dim>.json plus .codegraph/<dim>.md; use it once per dimension in phase 1 of analyze, never for editing code.
+description: Inspects one named /md_codegraph dimension (caps, cond, di, port, test, time, err, dead, or name) against its governing reference file and writes .codegraph/<dim>.json plus .codegraph/<dim>.md; use it once per dimension in phase 1 of analyze, never for editing code.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -55,7 +55,7 @@ majors → minors → deferred-conflict inventory last.
 ## Reference files — read these, and only these
 
 Your row's governing reference, plus `specs/finding.md` and `specs/graph-report.md` §1. Resolve
-under `${CLAUDE_PLUGIN_ROOT}/skills/codegraph/` when no absolute path is given. Do not read other
+under `${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/` when no absolute path is given. Do not read other
 references, other dimensions' artifacts, or another agent's reasoning. A missing reference file
 goes in `degraded`; never substitute a different one.
 
@@ -66,7 +66,7 @@ goes in `degraded`; never substitute a different one.
 3. Measure with a command, not by eye. For `caps`:
    `tools.caps.command` from `.codegraph/oracle.json` (absolute, resolved in phase 0), redirected
    to `.codegraph/caps.json`; no oracle file ⇒
-   `bash ${CLAUDE_PLUGIN_ROOT}/skills/codegraph/scripts/caps.sh --json --root <path>`, expanded.
+   `bash ${CLAUDE_PLUGIN_ROOT}/skills/md_codegraph/scripts/caps.sh --json --root <path>`, expanded.
    Others: `rg` with a literal pattern, `git log --numstat` for `time`, the repo's own installed
    linter when it has a rule ID. Run scripts; never read them.
 4. Prefer an existing linter's rule ID as the LAW field (`ruff TRY400`, PMD

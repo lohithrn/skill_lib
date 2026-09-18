@@ -1,4 +1,4 @@
-# SPEC — `/codegraph`
+# SPEC — `/md_codegraph`
 
 A skill that reads a codebase as a **graph**, finds where the graph is wrong, and
 restructures it so that every branch point becomes an interface, every interface has
@@ -196,14 +196,14 @@ code_graph_structure_skill/
 │   ├── codegraph-architect.md    #   → proposes the target structure
 │   ├── codegraph-adversary.md    #   → attacks the proposal
 │   └── codegraph-surgeon.md      #   → applies one slice
-└── skills/codegraph/
+└── skills/md_codegraph/
     ├── SKILL.md                  # THE CONFLICT: what does the user want? (router, ≤250 lines)
     ├── jobs/                     # THE RESOLVERS — one file per answer
-    │   ├── analyze.md            #   /codegraph analyze
-    │   ├── spec.md               #   /codegraph spec
-    │   ├── apply.md              #   /codegraph apply
-    │   ├── verify.md             #   /codegraph verify
-    │   ├── fitness.md            #   /codegraph fitness — writes layer-4 tests only
+    │   ├── analyze.md            #   /md_codegraph analyze
+    │   ├── spec.md               #   /md_codegraph spec
+    │   ├── apply.md              #   /md_codegraph apply
+    │   ├── verify.md             #   /md_codegraph verify
+    │   ├── fitness.md            #   /md_codegraph fitness — writes layer-4 tests only
     │   └── refine.md             #   the convergence loop (a callee, never a route)
     ├── specs/                    # OUTPUT CONTRACTS — the port signatures
     │   ├── graph-report.md
@@ -267,7 +267,7 @@ verified. Without it §2.8 is a wish.
 ## 6. Pipeline
 
 ```
-/codegraph <target>
+/md_codegraph <target>
    │
    ├─ 0 SCOPE      cheap: languages, LOC, entry points, test runner, existing caps
    ├─ 1 ANALYZE    fan out N cartographer+inspector agents in parallel, one per dimension
@@ -337,13 +337,13 @@ stop flag, never prose.
 
 | Command | Effect |
 |---|---|
-| `/codegraph` | **the whole interface.** Resumes from `.codegraph/`: no spec ⇒ analyze + spec, stopping at the phase-2 gate; unchecked approval ⇒ re-print the gate; approved spec ⇒ the next unapplied slice; all applied ⇒ verify. Every token below is an override, never a requirement |
-| `/codegraph analyze [path]` | phases 0–1 only. Read-only. Never edits |
-| `/codegraph spec [path]` | phases 0–2. Read-only except `.codegraph/` |
-| `/codegraph verify` | phase 3 on an existing spec |
-| `/codegraph apply [slice]` | phases 4–5. Requires an approved spec |
-| `/codegraph fitness` | write/refresh layer-4 tests only |
-| `/codegraph review [path]` | findings only, no spec, no edits |
+| `/md_codegraph` | **the whole interface.** Resumes from `.codegraph/`: no spec ⇒ analyze + spec, stopping at the phase-2 gate; unchecked approval ⇒ re-print the gate; approved spec ⇒ the next unapplied slice; all applied ⇒ verify. Every token below is an override, never a requirement |
+| `/md_codegraph analyze [path]` | phases 0–1 only. Read-only. Never edits |
+| `/md_codegraph spec [path]` | phases 0–2. Read-only except `.codegraph/` |
+| `/md_codegraph verify` | phase 3 on an existing spec |
+| `/md_codegraph apply [slice]` | phases 4–5. Requires an approved spec |
+| `/md_codegraph fitness` | write/refresh layer-4 tests only |
+| `/md_codegraph review [path]` | findings only, no spec, no edits |
 
 Gating: `disable-model-invocation: true`. The skill's description is never loaded into
 context; nothing auto-triggers it; it appears in `/` autocomplete only.
@@ -360,7 +360,7 @@ lines with bulk on disk. Same outcome, and fan-out survives. Add `context: fork`
 ## 10. Definition of done
 
 - [ ] `claude plugin validate . --strict` clean
-- [ ] `/codegraph` never fires without an explicit `/`
+- [ ] `/md_codegraph` never fires without an explicit `/`
 - [ ] `SKILL.md` ≤ 250 lines and contains no job logic
 - [ ] every reference file ≤ 600 lines, cites its sources, imports no other reference
 

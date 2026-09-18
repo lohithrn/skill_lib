@@ -1,0 +1,35 @@
+variable "project_name" {
+  description = "Name of the project/service. Supplied at deploy time from the repo/folder name; do not hardcode a value here."
+  type        = string
+}
+
+variable "environment" {
+  description = "Deployment environment (beta|prod)."
+  type        = string
+}
+
+variable "aws_profile" {
+  description = "AWS profile used as the credentials pointer. Required; the deploy scripts create this profile before terraform runs."
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region to deploy to."
+  type        = string
+}
+
+variable "prefix" {
+  description = "Prefix for resource names (environment_projectname). Derived at deploy time; never hardcoded."
+  type        = string
+}
+
+variable "deployment_tenant_profile" {
+  description = "Persisted-resource identity: the ONE value that names every persisted resource. Appended — lowercased — as the suffix on every resource name (and, in the deploy scripts, names the terraform state bucket). Supplied at deploy time (deployment_tenant_profile in the deploy scripts); has NO default there — an unset value fails the deploy loudly. Do not hardcode a value here."
+  type        = string
+}
+
+variable "service_image_uri" {
+  description = "Container image URI to deploy (ECR), if this service is containerized (ECS/App Runner/Lambda-container). Supplied at deploy time (SERVICE_IMAGE_URI). Empty for a Lambda-zip service."
+  type        = string
+  default     = ""
+}

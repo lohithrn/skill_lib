@@ -184,7 +184,12 @@ check_scripts_are_stdlib_only() {
 
 check_no_banned_auth_material() {
   local hits
-  hits=$(cd "$ROOT" && grep -rn -iE 'openssl (req|genrsa|genpkey|x509)|keytool|-----BEGIN [A-Z ]*PRIVATE KEY|self-signed' \
+  # Both halves require a VERB, symmetrically: the ban is on minting material, so `openssl req` and
+  # `keytool -genkeypair` are the finding while the bare tool name is not. A policy file has to be
+  # able to say "never run openssl/keytool to mint an auth credential" — naming the banned tool in a
+  # prohibition is the opposite of shipping the guidance, and a check that cannot tell the two apart
+  # forces the ban to be written in euphemism, which is how it stops being followed.
+  hits=$(cd "$ROOT" && grep -rn -iE 'openssl (req|genrsa|genpkey|x509)|keytool +-(genkey|genkeypair|importcert|certreq|selfcert)|-----BEGIN [A-Z ]*PRIVATE KEY|self-signed' \
         --exclude-dir=.git --exclude=smoke.sh . 2>/dev/null || true)
   if [ -z "$hits" ]; then
     pass "no generated cert/key material and no cert-as-auth guidance"
@@ -335,8 +340,15 @@ check_installer_installs_into_codex_home() {
   mkdir -p "$sandbox/codex"
   CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" \
     bash "$ROOT/install.sh" >/dev/null 2>&1
-  if [ -f "$sandbox/codex/skills"/*/SKILL.md ] 2>/dev/null; then
-    pass "install.sh installs into a Codex home too, and the SKILL.md is reachable"
+  # Count, never `[ -f <glob> ]`: with two or more skills installed the glob expands to two words and
+  # `[ -f a b ]` is a usage error, so the check reported "nothing installed" the moment the repo
+  # shipped its second skill. The assertion is "at least one reachable SKILL.md landed".
+  local reachable=0 skillmd
+  for skillmd in "$sandbox/codex/skills"/*/SKILL.md; do
+    [ -f "$skillmd" ] && reachable=$((reachable + 1))
+  done
+  if [ "$reachable" -gt 0 ]; then
+    pass "install.sh installs into a Codex home too, and all $reachable SKILL.md are reachable"
   else
     fail "install.sh installed nothing into the Codex home"
   fi
@@ -389,8 +401,19 @@ installer_clone_run() {
   out=$(CLAUDE_CONFIG_DIR="$sandbox/cfg" CODEX_HOME="$sandbox/codex" SKILL_LIB_REPO="file://$ROOT" \
         SKILL_LIB_BRANCH="$branch" bash "$sandbox/bin/install.sh" $flag 2>&1) || {
     fail "install.sh $phase from a clone failed: $(printf '%s' "$out" | tail -1)"; return 1; }
-  [ -f "$sandbox/cfg/skills"/*/SKILL.md ] 2>/dev/null \
-    && pass "install.sh installs from a fresh clone ($phase)" \
+  # Count, do not test one path: `[ -f dir/*/SKILL.md ]` is a single-argument test, so the moment
+  # the clone carries a SECOND skill the glob expands to two words and `[` dies on "too many
+  # arguments" — a green suite that turns red on a commit that added nothing but a skill.
+  # Count, and count THROUGH the symlink: the default install links `skills/<name>` at the
+  # destination, and `find` without `-L` will not descend into a symlinked directory, so a
+  # link-mode install could never satisfy this check. `[ -f ]` dereferences, which is the
+  # property being asserted anyway — the host has to be able to read the SKILL.md.
+  local landed=0 skillmd
+  for skillmd in "$sandbox/cfg/skills"/*/SKILL.md; do
+    [ -f "$skillmd" ] && landed=$((landed + 1))
+  done
+  [ "$landed" -gt 0 ] \
+    && pass "install.sh installs from a fresh clone ($phase): $landed skill(s)" \
     || { fail "install.sh $phase from a clone left no reachable SKILL.md"; return 1; }
 }
 
@@ -524,7 +547,7 @@ check_apply_gate_permits_multi_slice_progress() {
   # The sha gate said "spec sha must equal HEAD, else void". Slice 1 commits, HEAD moves, slice 2 is
   # declared void and the user is told to re-run `spec` — which rewrites the spec and voids the
   # approval they just gave. `apply all` could never reach slice 2, and neither could the bare
-  # `/codegraph` resume that SKILL.md calls the whole interface. It failed CLOSED, so nothing was
+  # `/md_codegraph` resume that SKILL.md calls the whole interface. It failed CLOSED, so nothing was
   # unsafe; the feature was simply unreachable. Doc-level check, because `apply` is model-driven.
   local f="$ROOT"/*/skills/*/jobs/apply.md
   # shellcheck disable=SC2086
@@ -1158,6 +1181,49 @@ check_target_git_config_is_not_honoured() {
   [ "$rc" -eq 0 ] && pass "the analysed repo's git config cannot execute anything"
 }
 
+check_copied_caps_agree_across_skills() {
+  # md_policy-code-review carries its OWN copy of the structural caps on purpose: it must rule from a
+  # bare checkout with no sibling skill installed. A copy that can drift silently is worse than a
+  # dependency, so the drift is what this check forbids — the two tables must agree row by row on
+  # every limit they share, and codegraph's is the source.
+  local source_table copy_table
+  source_table=$(cd "$ROOT" && ls ./*/skills/md_codegraph/SKILL.md 2>/dev/null | head -1)
+  copy_table=$(cd "$ROOT" && ls ./*/skills/md_policy-code-review/references/graph-policy.md 2>/dev/null | head -1)
+  if [ -z "$source_table" ] || [ -z "$copy_table" ]; then
+    return  # one of the two skills is not in this checkout; nothing to compare
+  fi
+  # Normalize a markdown cap row to "label|warn|hard": drop bold, backticks and the resolution cell.
+  local norm='
+    /^\| *(File length|Method length|Nesting depth in a method|Loop body length|`?else`?|Parameters|Public members per class)/ {
+      gsub(/\*\*/, ""); gsub(/`/, "");
+      split($0, c, "|");
+      for (i = 2; i <= 4; i++) { gsub(/^ +| +$/, "", c[i]) }
+      print c[2] "|" c[3] "|" c[4];
+    }'
+  local a b diffout
+  a=$(cd "$ROOT" && awk "$norm" "$source_table" | sort)
+  b=$(cd "$ROOT" && awk "$norm" "$copy_table" | sort)
+  if [ -z "$a" ] || [ -z "$b" ]; then
+    fail "could not read a cap table out of $source_table or $copy_table"
+    return
+  fi
+  # Compare only the rows both tables carry: the copy may add caps (methods per port, inheritance
+  # depth) that the router's abbreviated table leaves to references/laws.md.
+  diffout=$(comm -3 <(printf '%s\n' "$a") <(printf '%s\n' "$b") \
+            | awk -F'|' 'NF { print $1 }' | sed 's/^\t//' | sort -u \
+            | while IFS= read -r label; do
+                printf '%s\n' "$a" | grep -q "^$label|" && printf '%s\n' "$b" | grep -q "^$label|" \
+                  && printf '%s: codegraph says %s / policy says %s\n' "$label" \
+                       "$(printf '%s\n' "$a" | grep "^$label|")" "$(printf '%s\n' "$b" | grep "^$label|")"
+              done)
+  if [ -z "$diffout" ]; then
+    pass "the copied structural caps still agree with codegraph's numbers"
+  else
+    fail "md_policy-code-review's cap copy has drifted from md_codegraph"
+    printf '%s\n' "$diffout" | head -5 | sed 's/^/      /'
+  fi
+}
+
 # ------------------------------------------------------------------- main ----
 
 head2 "OFFLINE"
@@ -1192,6 +1258,7 @@ check_documented_flags_are_accepted
 check_file_length_caps
 check_skill_frontmatter
 check_agent_frontmatter
+check_copied_caps_agree_across_skills
 
 head2 "BEHAVIOR"
 make_fixture

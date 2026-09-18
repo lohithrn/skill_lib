@@ -1,0 +1,98 @@
+locals {
+  # CLI profile pointer for the sync commands. Defaults to the required
+  # aws_profile; profile_aws_name can override it if you ever need a distinct
+  # CLI profile. Always non-empty, so --profile is always passed.
+  effective_cli_profile = var.profile_aws_name != "" ? var.profile_aws_name : var.aws_profile
+  aws_profile_flag      = " --profile ${local.effective_cli_profile}"
+}
+
+resource "aws_s3_bucket" "web_bucket" {
+  bucket        = var.web_s3_bucket_name
+  force_destroy = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = {
+    Name        = "${var.web_s3_bucket_name}"
+    Environment = var.environment
+  }
+}
+
+resource "aws_s3_bucket_website_configuration" "web_bucket_website" {
+  bucket = aws_s3_bucket.web_bucket.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "index.html"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "web_bucket_access" {
+  bucket = aws_s3_bucket.web_bucket.id
+
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_policy" "web_bucket_policy" {
+  bucket     = aws_s3_bucket.web_bucket.id
+  depends_on = [aws_s3_bucket_public_access_block.web_bucket_access]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "PublicReadGetObject"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.web_bucket.arn}/*"
+      },
+    ]
+  })
+}
+
+# Upload web app files to S3 with SEO-aware cache-control (see ../../SEO_CACHING.md).
+#
+# Two-pass sync:
+#   1. Long, immutable cache for everything under /assets/* (Vite's content-hashed
+#      JS/CSS bundles; copied media keeps stable names). New builds get new hashed
+#      filenames, so a year-long immutable cache is safe for them.
+#   2. Short / revalidated cache for the crawl/entry surfaces: index.html, the
+#      per-route */index.html files, sitemap.xml, and robots.txt. These must be
+#      re-fetched on every deploy so new canonicals + sitemap changes are picked
+#      up and Google recrawls promptly.
+# --delete is only on the second pass so stale keys are removed exactly once
+# after both content classes have been uploaded.
+resource "null_resource" "web_app_upload" {
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  # Optional --profile flag: only emitted when a profile pointer is provided,
+  # so an empty value falls back to the ambient/env credentials instead of
+  # producing a broken "--profile " flag.
+  # Pass 1: hashed / static assets → immutable long cache.
+  provisioner "local-exec" {
+    command = "aws s3 sync ${var.web_app_build_path} s3://${var.web_s3_bucket_name}${local.aws_profile_flag} --region ${var.aws_region} --exclude \"*\" --include \"assets/*\" --cache-control \"public, max-age=31536000, immutable\""
+  }
+
+  # Pass 2: HTML / sitemap / robots → short cache, always revalidated. Runs the
+  # --delete cleanup pass over the full tree.
+  provisioner "local-exec" {
+    command = "aws s3 sync ${var.web_app_build_path} s3://${var.web_s3_bucket_name} --delete${local.aws_profile_flag} --region ${var.aws_region} --exclude \"assets/*\" --cache-control \"public, max-age=0, must-revalidate\""
+  }
+
+  depends_on = [
+    aws_s3_bucket.web_bucket,
+    aws_s3_bucket_policy.web_bucket_policy,
+    aws_s3_bucket_website_configuration.web_bucket_website
+  ]
+} 

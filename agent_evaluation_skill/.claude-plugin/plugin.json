@@ -1,0 +1,21 @@
+{
+  "name": "agent-evaluation",
+  "displayName": "Agent Evaluation",
+  "description": "A research-backed, tool-aware, stateful framework for evaluating production AI agents: score the outcome, the trajectory and the risk surface separately across eight metric layers, treat every case as an executable specification with goal-state predicates, gate critical safety failures, and report per-case/macro/worst-slice numbers with confidence intervals instead of one aggregate score. Advises and measures only; never edits a tree.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lohith"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agent-evaluation",
+    "tool-calling",
+    "llm-as-a-judge",
+    "ndcg",
+    "reliability",
+    "prompt-injection",
+    "calibration",
+    "benchmarks",
+    "read-only"
+  ]
+}

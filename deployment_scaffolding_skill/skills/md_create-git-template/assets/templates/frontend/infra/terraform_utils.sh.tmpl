@@ -1,0 +1,293 @@
+#!/bin/bash
+
+# Initialize common variables
+init_terraform_deployment_vars() {
+    local profile=${1}
+    local environment=${2}
+    local region=${3}
+
+    # Get project name from directory name
+    PROJECT_NAME=$(basename $(pwd))
+
+    echo "Deploying project: ${PROJECT_NAME}"
+    echo "Environment: ${environment}"
+    echo "AWS Profile: ${profile}"
+    echo "AWS Region: ${region}"
+
+    # Create temporary directory for Terraform files
+    TEMP_TF_PATH="$(pwd)/infra/terraform/.terraform"
+    LOCAL_TF_PLAN="${TEMP_TF_PATH}/${PROJECT_NAME}_${environment}.tfplan"
+    mkdir -p $TEMP_TF_PATH
+}
+
+# Create and configure S3 backend bucket
+setup_terraform_backend() {
+    local profile=${1}
+    local region=${2}
+    local backend_bucket=${3}
+    
+    echo "DEBUG: Attempting to access bucket: ${backend_bucket}"
+    echo "DEBUG: Using AWS Profile: ${profile}"
+    echo "DEBUG: Using Region: ${region}"
+    
+    # Check if bucket exists with more verbose output
+    set +e
+    aws s3 ls "s3://${backend_bucket}" --profile "${profile}" --region "${region}"
+    bucket_check=$?
+    echo "DEBUG: Bucket check exit code: ${bucket_check}"
+    set -e
+    if [ $bucket_check -eq 0 ]; then
+        echo "Using existing S3 backend bucket: ${backend_bucket}"
+    else
+        echo "Creating new S3 backend bucket: ${backend_bucket}"
+        # Create the bucket
+        if ! aws s3api create-bucket \
+            --bucket "${backend_bucket}" \
+            --profile "${profile}" \
+            --region "${region}" \
+            $([ "${region}" != "us-east-1" ] && echo "--create-bucket-configuration LocationConstraint=${region}") ; then
+            echo "Failed to create S3 bucket"
+            exit 1
+        fi
+
+        # Enable versioning
+        aws s3api put-bucket-versioning \
+            --bucket "${backend_bucket}" \
+            --profile "${profile}" \
+            --versioning-configuration Status=Enabled
+
+        # Enable encryption
+        aws s3api put-bucket-encryption \
+            --bucket "${backend_bucket}" \
+            --profile "${profile}" \
+            --server-side-encryption-configuration '{
+                "Rules": [
+                    {
+                        "ApplyServerSideEncryptionByDefault": {
+                            "SSEAlgorithm": "AES256"
+                        }
+                    }
+                ]
+            }'
+
+        # Block public access
+        aws s3api put-public-access-block \
+            --bucket "${backend_bucket}" \
+            --profile "${profile}" \
+            --public-access-block-configuration '{
+                "BlockPublicAcls": true,
+                "IgnorePublicAcls": true,
+                "BlockPublicPolicy": true,
+                "RestrictPublicBuckets": true
+            }'
+
+        echo "Successfully created and configured S3 backend bucket"
+    fi
+
+    echo "${backend_bucket}"
+}
+
+# Create terraform vars file
+create_tfvars() {
+    local tenant_name=${1}
+    local environment=${2}
+    local region=${3}
+    local tfvars_path=${4}
+    local image_name_passed_as_parameter=${5}
+    local domain_name=${6}
+    local subdomain_name=${7}
+    local certificate_domain_lookup=${8}
+    local web_app_build_path=${9}
+    local web_s3_bucket_name=${10}
+    local certificate_arn=${11}
+    local apex_domain_name=${12}
+    local profile=${13:-}
+
+    echo "DEBUG: certificate_arn in create_tfvars: ${certificate_arn}"
+    
+    echo "project_name = \"${PROJECT_NAME}\"" > ${tfvars_path}
+    echo "environment = \"${environment}\"" >> ${tfvars_path}
+    echo "aws_region = \"${region}\"" >> ${tfvars_path}
+    echo "prefix = \"${environment}_${PROJECT_NAME}\"" >> ${tfvars_path}
+    echo "image_name_passed_as_parameter = \"${image_name_passed_as_parameter}\"" >> ${tfvars_path}
+    echo "domain_name = \"${domain_name}\"" >> ${tfvars_path}
+    echo "subdomain_name = \"${subdomain_name}\"" >> ${tfvars_path}
+    echo "certificate_domain_lookup = \"${certificate_domain_lookup}\"" >> ${tfvars_path}
+    echo "certificate_arn = \"${certificate_arn}\"" >> ${tfvars_path}
+    echo "web_app_build_path = \"${web_app_build_path}\"" >> ${tfvars_path}
+    echo "web_s3_bucket_name = \"${web_s3_bucket_name}\"" >> ${tfvars_path}
+    echo "apex_domain_name = \"${apex_domain_name}\"" >> ${tfvars_path}
+    echo "tenant_name = \"${tenant_name}\"" >> ${tfvars_path}
+    # Credentials pointer only (may be empty → terraform uses ambient creds).
+    echo "aws_profile = \"${profile}\"" >> ${tfvars_path}
+    echo "profile_aws_name = \"${profile}\"" >> ${tfvars_path}
+}
+
+
+# Run terraform init, plan, and apply
+run_terraform() {
+    local profile=${1}
+    local environment=${2}
+    local region=${3}
+    local tfvars_path=${4}
+    local plan_path=${5}
+    local backend_bucket=${6}
+
+    cd infra/terraform
+
+    # Print a large, unmissable error banner and exit the whole shell non-zero.
+    # $1 = phase label, $2 = captured terraform exit code.
+    terraform_fail() {
+        local phase="$1"
+        local code="$2"
+        echo ""
+        echo "################################################################################"
+        echo "################################################################################"
+        echo "##"
+        echo "##   ❌❌❌  TERRAFORM ${phase} FAILED  ❌❌❌"
+        echo "##"
+        echo "##   Terraform exited with a non-zero status: ${code}"
+        echo "##   Environment : ${environment}"
+        echo "##   Project     : ${PROJECT_NAME}"
+        echo "##   AWS profile : ${profile}"
+        echo "##   Region      : ${region}"
+        echo "##   Backend     : ${backend_bucket}"
+        echo "##"
+        echo "##   The deployment did NOT complete. Review the terraform output above"
+        echo "##   for the root cause, fix it, and re-run the deploy script."
+        echo "##"
+        echo "################################################################################"
+        echo "################################################################################"
+        echo ""
+        cd ../.. 2>/dev/null || true
+        exit "${code:-1}"
+    }
+
+    echo "DEBUG: Initializing Terraform with backend config:"
+    echo "  Region: ${region}"
+    echo "  Key: ${PROJECT_NAME}/${environment}/terraform.tfstate"
+    echo "  Profile: ${profile}"
+    echo "  Bucket: ${backend_bucket}"
+
+    # Initialize Terraform with S3 backend configuration
+    echo "===== Starting Terraform Init ====="
+    set +e
+    # The S3 backend authenticates from the project-local AWS profile (created by
+    # the deploy flow) via -backend-config="profile=". This is a credentials
+    # pointer only and does NOT affect the bucket/key (those are tenant/project
+    # based), so state never drifts between local and CI.
+    terraform init -reconfigure \
+        -backend-config="bucket=${backend_bucket}" \
+        -backend-config="region=${region}" \
+        -backend-config="key=${PROJECT_NAME}/${environment}/terraform.tfstate" \
+        -backend-config="profile=${profile}"
+    tf_code=$?
+    set -e
+    if [ "${tf_code}" -ne 0 ]; then
+        terraform_fail "INIT" "${tf_code}"
+    fi
+
+    echo "===== Starting Terraform Plan ====="
+    set +e
+    terraform plan \
+        -var-file=$tfvars_path \
+        -out=$plan_path \
+        -lock=false \
+        -input=false
+    tf_code=$?
+    set -e
+    if [ "${tf_code}" -ne 0 ]; then
+        terraform_fail "PLAN" "${tf_code}"
+    fi
+
+    echo "===== Starting Terraform Apply ====="
+    set +e
+    terraform apply -lock=false $plan_path
+    tf_code=$?
+    set -e
+    if [ "${tf_code}" -ne 0 ]; then
+        terraform_fail "APPLY" "${tf_code}"
+    fi
+
+    echo "===== Fetching Outputs ====="
+    set +e
+    terraform refresh -var-file=$tfvars_path
+    tf_code=$?
+    set -e
+    if [ "${tf_code}" -ne 0 ]; then
+        terraform_fail "REFRESH" "${tf_code}"
+    fi
+    terraform output > "../terraform_outputs_${environment}.txt"
+
+    echo "Deployment Complete!"
+
+    cd ../..
+
+}
+
+
+# Main deployment function
+deploy_terraform() {
+    local profile=${1}
+    local environment=${2}
+    local region=${3}
+    local project_name=${4}
+    local domain_name=${5}
+    local web_app_build_path=${6}
+    local web_s3_bucket_name=${7}
+    local certificate_arn=${8}
+    local apex_domain_name=${9}
+    # tenant_name (branding/display only) may be passed explicitly as arg 10; fall
+    # back to the exported env var. It must NOT name any persisted resource.
+    local tenant_name=${10:-${tenant_name:-}}
+    # deployment_tenant_profile is the PERSISTED-RESOURCE IDENTITY: it names the
+    # terraform state bucket + resource suffixes. Passed explicitly as arg 11 by
+    # the deploy scripts; falls back to the exported env var. NO other default.
+    local deployment_tenant_profile=${11:-${deployment_tenant_profile:-}}
+
+    # aws_profile is a required credentials pointer for terraform; the deploy
+    # scripts always set it (temporary_aws_profile_name). Fail loudly if empty.
+    if [ -z "${profile:-}" ]; then
+        echo "ERROR: profile (aws_profile) is not set; it is required by terraform." >&2
+        exit 1
+    fi
+
+    echo "DEBUG: certificate_arn in deploy_terraform: ${certificate_arn}"
+
+    export IMAGE_NAME="${project_name}_${tenant_name}_${environment}_image"
+        
+    image_name_passed_as_parameter="${project_name}/${IMAGE_NAME}"
+
+    echo "image_name_passed_as_parameter: ${image_name_passed_as_parameter}"
+
+    init_terraform_deployment_vars "$profile" "$environment" "$region"
+    
+    # Create the backend bucket name. Keyed off deployment_tenant_profile (the
+    # PERSISTED-RESOURCE IDENTITY, passed as arg 11 by the deploy script or via the
+    # exported env var) so it is identical for local and pipeline runs. It must NOT
+    # be a function of the AWS profile (which differs between SSO-local and CI) nor
+    # of tenant_name (branding) or the state would drift between environments.
+    # NO default: fail loudly if empty rather than silently pick another identity.
+    if [ -z "${deployment_tenant_profile:-}" ]; then
+        echo "ERROR: deployment_tenant_profile is not set; it is the persisted-resource" >&2
+        echo "       identity and is required to build the terraform backend bucket name." >&2
+        echo "       It has NO default (never falls back to tenant_name/PROJECT_NAME)." >&2
+        exit 1
+    fi
+    local BACKEND_BUCKET="terraform-$(echo ${environment} | tr '[:upper:]' '[:lower:]')-$(echo ${deployment_tenant_profile} | tr '[:upper:]' '[:lower:]')-state"
+    
+    export BACKEND_BUCKET
+    
+    echo "DEBUG: Created backend bucket name: ${BACKEND_BUCKET}"
+    
+    # Setup S3 backend bucket
+    setup_terraform_backend "$profile" "$region" "$BACKEND_BUCKET"
+    
+    echo "DEBUG: Backend bucket being passed to run_terraform: ${BACKEND_BUCKET}"
+    
+    TFVARS_FILE="${TEMP_TF_PATH}/terraform.tfvars"
+    
+    create_tfvars "$tenant_name" "$environment" "$region" "$TFVARS_FILE" "$image_name_passed_as_parameter" "$domain_name" "$subdomain_name" "$certificate_domain_lookup" "$web_app_build_path" "$web_s3_bucket_name" "$certificate_arn" "$apex_domain_name" "$profile"
+
+    run_terraform "$profile" "$environment" "$region" "$TFVARS_FILE" "$LOCAL_TF_PLAN" "$BACKEND_BUCKET"
+} 

@@ -1,0 +1,60 @@
+# backend_service template — tokens
+
+Every `__TOKEN__` below is substituted at repo-creation time by
+the `setup_new_repo.py` scaffolder. Search the tree for each token to see
+where it lands. Tokens are shared across all four repo-skeleton templates, so the
+same name means the same thing everywhere.
+
+| Token | Meaning | Example |
+|-------|---------|---------|
+| `__PROJECT_NAME__` | Logical repo / project + service name. Also the value of the THROWAWAY CLI profile `temporary_aws_profile_name`. In practice derived from the repo folder name at deploy time (`basename $PWD`); used in the pipeline `name:`, Dockerfile header, and as the CLI profile / login-profile fallback. | `TenantPublishService` |
+| `__TENANT_NAME__` | Tenant / display-branding identifier (lowercase). Pure branding only — does NOT name any persisted resource (that is `__DEPLOYMENT_TENANT_PROFILE__`). Optional. | `acme` |
+| `__DEPLOYMENT_TENANT_PROFILE__` | PERSISTED-RESOURCE identity: the ONE value that names every persisted resource — the terraform state bucket `terraform-<env>-<deployment_tenant_profile>-state` AND the lowercased suffix on every terraform resource name. Must NOT depend on the CLI/login profile so local + CI share one state. **HAS NO DEFAULT** in the deploy scripts — an unset/empty value fails the deploy loudly (stderr + exit 1) before any AWS action. Lowercased for S3. | `acme` |
+| `__AWS_ACCOUNT_ID__` | 12-digit AWS account id. Single source of truth in `infra/aws_account_config.sh` (beta + prod default to the same value; edit `AWS_ACCOUNT_PROD` if prod differs). | `<account-id>` |
+| `__BACKEND_DEPLOY_ROLE_NAME__` | Name of the IAM role the CI user assumes to deploy (created by the deployment-role provisioner). Used ONLY on the CI assume-role path in `infra/provider_login.sh`; the account half of the ARN comes from `aws_account_config.sh`. No sensible generic default — if unsubstituted the CI assume-role fails loudly. (Local SSO deploys never touch it.) Override the whole ARN via `BACKEND_DEPLOY_ROLE_ARN`. | `TenantPublishService-backend-deploy-role` |
+| `__SSO_START_URL__` | AWS IAM Identity Center (SSO) start URL, used by the local deploy to self-configure the SSO profile. | `<sso-start-url>` |
+| `__SSO_REGION__` | Region of the IAM Identity Center portal (where SSO lives, not necessarily where you deploy). | `us-east-1` |
+| `__DEPLOY_REGION_BETA__` | AWS region the BETA environment deploys into. | `us-west-2` |
+| `__DEPLOY_REGION_PROD__` | AWS region the PROD environment deploys into. | `us-west-1` |
+| `__ECR_REPO_NAME__` | Container image repo name in ECR (only if the service is containerized — referenced in the Dockerfile header and the `build_service_artifact` container sketch). | `tenant-publish-service` |
+| `__GITHUB_ORG__` | GitHub organization owning the repo (metadata). | `Acme` |
+| `__GITHUB_REPO__` | GitHub repository name (metadata). | `TenantPublishService` |
+
+### Deliberately NOT tokenized
+
+- **`DOCKER_IMAGE` in `pipelines/azure-pipelines.yml`** (`docker.io/...`) — the
+  SHARED CI deployment image (the ADO build agent container). Same for every repo;
+  left as-is on purpose, not a per-repo knob.
+- **Dockerfile base image** (`python:3.12-slim`) — a standard public base any repo
+  can pull; not personal/private. Change it only if your service needs a different
+  runtime.
+
+## The profile model — TWO identities (do not conflate)
+
+This is the whole point of the deploy scaffolding. There are TWO distinct
+identities. The login/SSO source (`PROFILE`) is a facet of the first — it is HOW
+you obtain the credentials that get written into the throwaway CLI profile.
+
+1. **THROWAWAY CLI PROFILE** — `temporary_aws_profile_name` (value = `${PROJECT_NAME}`),
+   exported as `AWS_PROFILE`. The credentials pointer the AWS CLI + terraform are
+   forced to name (`--profile`). The assumed-role session is WRITTEN INTO it; it is
+   created/deleted, may change run-to-run, and **MUST NEVER name a persisted
+   resource**.
+   - Its SOURCE is **`PROFILE`** (the LOGIN / SSO identity, from `PARAM_PROFILE_NAME`) —
+     locally the folder-named SSO profile (which doubles as the CLI profile, same
+     `${PROJECT_NAME}` name); in CI the static base creds that assume the deploy
+     role. Tokenized SSO endpoint: `__SSO_START_URL__` / `__SSO_REGION__`.
+2. **PERSISTED-RESOURCE IDENTITY** — `deployment_tenant_profile`
+   (`__DEPLOYMENT_TENANT_PROFILE__`). The ONE identity that names every persisted
+   resource: the terraform state bucket `terraform-<env>-<deployment_tenant_profile>-state`
+   AND the lowercased suffix on every terraform resource name
+   (`<prefix>_<role>_<deployment_tenant_profile>`). Deliberately independent of the
+   CLI/login profile so a local SSO deploy and a CI assume-role deploy read/write
+   the SAME state and own the SAME resources. **NO DEFAULT** — `deploy()` in
+   `infra/deploy_utils.sh` fails loudly (stderr + exit 1) if it is empty/unset,
+   before any AWS action, alongside the `assert_aws_account` gate. Lowercased for S3.
+
+`__TENANT_NAME__` is pure display branding and names nothing persisted.
+
+Account ids are never hardcoded outside `infra/aws_account_config.sh`;
+`assert_aws_account` gates every deploy against the account the environment maps to.

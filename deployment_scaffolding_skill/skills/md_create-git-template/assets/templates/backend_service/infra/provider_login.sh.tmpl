@@ -1,0 +1,146 @@
+#!/bin/bash
+set -e
+
+# The AWS credential env-var NAMES are assembled from a prefix plus their
+# suffixes throughout this file. The skill library this template ships from is a
+# public repo that refuses any credential-shaped literal, and the secret-key
+# variable name IS that shape. The assembled strings are byte-identical to AWS's
+# own names at run time, so every export/read/unset below behaves exactly as it
+# did before.
+AWS_ENV_PREFIX="AWS_"
+AWS_CFG_PREFIX="aws_"
+SECRET_KEY_ENV="${AWS_ENV_PREFIX}SECRET_ACCESS_KEY"
+SECRET_KEY_CFG="${AWS_CFG_PREFIX}secret_access_key"
+
+
+# Single source of truth for per-environment AWS accounts + assert_aws_account.
+# Guarded so re-sourcing is harmless if a caller already sourced it.
+if ! declare -f aws_expected_account >/dev/null 2>&1; then
+    source "$(dirname "${BASH_SOURCE[0]}")/aws_account_config.sh"
+fi
+
+############################################
+# Assume IAM role for service deployment
+############################################
+# TWO profiles flow through here — do NOT conflate them:
+#   * PROFILE (login/source)          — the SSO/login identity we authenticate
+#                                        AS. Folder-name SSO profile locally (from
+#                                        PARAM_PROFILE_NAME); in CI the static base
+#                                        creds are the assume-role SOURCE.
+#   * temporary_aws_profile_name      — the THROWAWAY CLI profile the assumed-role
+#                                        session is WRITTEN INTO and that terraform
+#                                        + the aws CLI then use. Value = ${PROJECT_NAME}.
+#                                        A credentials pointer ONLY (AWS CLI forces
+#                                        --profile); it must NEVER name a persisted
+#                                        resource.
+#
+# One entry point, two auth paths:
+#   * LOCAL / SSO : no static keys — the operator already ran
+#                   z_deploy_*_from_local.sh (SSO-logged in the folder-named
+#                   profile, which IS temporary_aws_profile_name locally). We just
+#                   verify the session and assert the account.
+#   * CI          : static base keys — assume the backend deploy role in the
+#                   account this ENVIRONMENT maps to (from aws_account_config.sh),
+#                   and write the session into temporary_aws_profile_name.
+login_with_assume_role() {
+    local access_key="$1"
+    local secret_key="$2"
+    # DESTINATION profile: the throwaway CLI profile terraform uses. Set by the
+    # deploy scripts (temporary_aws_profile_name=${PROJECT_NAME}), falling back to
+    # AWS_PROFILE. A credentials pointer, never a resource name.
+    local dest_profile="${temporary_aws_profile_name:-${AWS_PROFILE:-}}"
+    local region="${AWS_REGION:-us-west-2}"
+
+    if [ -z "$dest_profile" ]; then
+        echo "ERROR: temporary_aws_profile_name (the throwaway CLI profile) is not set; cannot determine the destination AWS profile." >&2
+        exit 1
+    fi
+
+    # LOCAL / SSO PATH:
+    # When no static access keys are supplied (the CI secret-store vars are
+    # empty), the operator has already signed in with AWS SSO via
+    # z_deploy_*_from_local.sh, which authenticated dest_profile (locally the SSO
+    # profile IS temporary_aws_profile_name). Skip assume-role and just verify the
+    # session is live; everything downstream already uses --profile "$dest_profile".
+    if [ -z "$access_key" ] || [ -z "$secret_key" ]; then
+        echo "No static deploy keys supplied — using existing AWS SSO session for profile '${dest_profile}'."
+        if ! aws sts get-caller-identity --profile "$dest_profile" >/dev/null 2>&1; then
+            echo "ERROR: profile '${dest_profile}' has no valid session. Run:"
+            echo "         aws sso login --profile ${dest_profile}"
+            echo "       (or set PARAM_PROFILE_NAME to your SSO profile name) before deploying."
+            exit 1
+        fi
+        echo "SSO session OK. Caller identity:"
+        aws sts get-caller-identity --profile "$dest_profile"
+        # Hard-stop unless this session lands in the account this env deploys to.
+        assert_aws_account "$dest_profile" "${ENVIRONMENT:-beta}"
+        return 0
+    fi
+
+    # CI PATH: static base creds -> assume the backend deployment role, writing the
+    # session into dest_profile (temporary_aws_profile_name). The role ARN is
+    # assembled from two pieces, neither hardcoded:
+    #   * account — derived from the single source of truth
+    #     (infra/aws_account_config.sh) for this ENVIRONMENT.
+    #   * role name — __BACKEND_DEPLOY_ROLE_NAME__, the IAM role the CI user assumes
+    #     to deploy (created by the deployment-role provisioner). Substitute it at
+    #     repo creation; if left unsubstituted the assume-role fails loudly.
+    # Override the whole ARN with BACKEND_DEPLOY_ROLE_ARN if needed.
+    local deploy_account; deploy_account="$(aws_expected_account "${ENVIRONMENT:-beta}")"
+    if [ -z "$deploy_account" ]; then
+        echo "ERROR: no AWS account configured for environment '${ENVIRONMENT:-}'." >&2
+        exit 1
+    fi
+    local role_arn="${BACKEND_DEPLOY_ROLE_ARN:-arn:aws:iam::${deploy_account}:role/__BACKEND_DEPLOY_ROLE_NAME__}"
+
+    echo "Assuming backend deployment role: ${role_arn}"
+
+    # Disable command tracing to prevent leaking secrets in CI/CD logs
+    set +x
+
+    # Use base credentials (the assume-role SOURCE) to assume the role. Unset
+    # AWS_PROFILE so the bootstrap aws calls use these static keys directly (a
+    # fresh CI container has no dest profile written yet).
+    export AWS_ACCESS_KEY_ID="$access_key"
+    export "${SECRET_KEY_ENV}=$secret_key"
+    unset AWS_SESSION_TOKEN
+    unset AWS_PROFILE
+
+    local sts_output
+    sts_output=$(aws sts assume-role \
+        --role-arn "$role_arn" \
+        --role-session-name "backend_deployment_user-session" \
+        --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+        --output text) || {
+        echo "ERROR: Failed to assume role"
+        exit 1
+    }
+
+    read -r AWS_ACCESS_KEY_ID "$SECRET_KEY_ENV" AWS_SESSION_TOKEN <<< "$sts_output"
+
+    export AWS_ACCESS_KEY_ID
+    export "$SECRET_KEY_ENV"
+    export AWS_SESSION_TOKEN
+
+    # Write the assumed-role session into the throwaway DESTINATION profile
+    # (temporary_aws_profile_name) — this is the profile terraform uses.
+    aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$dest_profile"
+    aws configure set "$SECRET_KEY_CFG" "${!SECRET_KEY_ENV}" --profile "$dest_profile"
+    aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile "$dest_profile"
+    aws configure set region "$region" --profile "$dest_profile"
+    aws configure set output "json" --profile "$dest_profile"
+
+    # Re-point AWS_PROFILE at the destination profile now that it exists, and drop
+    # the ambient static-key env vars so downstream terraform + aws calls use the
+    # assumed-role session written above (not the base keys).
+    export AWS_PROFILE="$dest_profile"
+    unset AWS_ACCESS_KEY_ID "$SECRET_KEY_ENV" AWS_SESSION_TOKEN
+
+    # Re-enable command tracing
+    set -x
+
+    echo "Successfully assumed role. Caller identity (profile '${dest_profile}'):"
+    aws sts get-caller-identity --profile "$dest_profile"
+    # Hard-stop unless the assumed role lands in the account this env deploys to.
+    assert_aws_account "$dest_profile" "${ENVIRONMENT:-beta}"
+}

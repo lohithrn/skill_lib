@@ -1,0 +1,103 @@
+name: __PROJECT_NAME__
+
+trigger: none
+pr: none
+
+
+variables:
+  - group: __TENANT_NAME_UPPER__
+  - name: DOCKER_IMAGE
+    value: "docker.io/<registry-org>/<ci-deploy-image>:latest"
+
+parameters:
+  - name: profile_name
+    type: string
+    displayName: "Profile Name"
+    default: "__TENANT_NAME__"
+
+stages:
+- stage: DeployBeta
+  displayName: 'Deploy to Beta Environment'
+  jobs:
+  - deployment: BetaDeployment
+    displayName: 'Deploy to Beta'
+    pool:
+      vmImage: 'ubuntu-latest'
+    container:
+      image: ${{ variables.DOCKER_IMAGE }}
+      options: --platform linux/amd64
+    environment:
+      name: 'beta'
+      # This environment should be configured in Azure DevOps with approval checks
+    variables:
+      PARAM_PROFILE_NAME: ${{ parameters.profile_name }}
+      BETA_AWS_REGION: '__DEPLOY_REGION_BETA__'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              fetchDepth: "0"
+              clean: "true"
+              path: 's/$(Build.Repository.Name)'
+              displayName: 'Checkout Repository'
+
+            - bash: |
+                set -e
+                set -x
+                pwd
+                ls -l
+                echo "Deploying to Beta Environment..."
+                chmod +x z_setup_s3_create_deploy_beta.sh
+                ./z_setup_s3_create_deploy_beta.sh
+
+                echo "Successfully deployed to Beta environment"
+              displayName: 'Deploy to Beta Environment'
+              workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+              env:
+                __TENANT_NAME_UPPER___BETA_FRONTEND_AWS_ACCESS_KEY: $(__TENANT_NAME_UPPER___BETA_FRONTEND_AWS_ACCESS_KEY)
+                __TENANT_NAME_UPPER___BETA_FRONTEND_AWS_SECRET_KEY: $(__TENANT_NAME_UPPER___BETA_FRONTEND_AWS_SECRET_KEY)
+
+- stage: DeployToProd
+  displayName: 'Deploy to Production'
+  dependsOn: DeployBeta
+  condition: succeeded('DeployBeta')
+  jobs:
+  - deployment: ProductionDeployment
+    displayName: 'Deploy to Production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    container:
+      image: ${{ variables.DOCKER_IMAGE }}
+      options: --platform linux/amd64
+    environment:
+      name: 'prod'
+      # This environment should be configured in Azure DevOps with approval checks
+    variables:
+      PARAM_PROFILE_NAME: ${{ parameters.profile_name }}
+      PROD_AWS_REGION: '__DEPLOY_REGION_PROD__'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              fetchDepth: "0"
+              clean: "true"
+              path: 's/$(Build.Repository.Name)'
+              displayName: 'Checkout Repository'
+
+            - bash: |
+                set -e
+                set -x
+                pwd
+                ls -l
+                echo "Deploying to Production..."
+                chmod +x z_setup_s3_create_deploy_prod.sh
+                ./z_setup_s3_create_deploy_prod.sh
+
+                echo "Successfully deployed to Production"
+              displayName: 'Deploy to Production'
+              workingDirectory: $(Pipeline.Workspace)/s/$(Build.Repository.Name)
+              env:
+                __TENANT_NAME_UPPER___PROD_FRONTEND_AWS_ACCESS_KEY: $(__TENANT_NAME_UPPER___PROD_FRONTEND_AWS_ACCESS_KEY)
+                __TENANT_NAME_UPPER___PROD_FRONTEND_AWS_SECRET_KEY: $(__TENANT_NAME_UPPER___PROD_FRONTEND_AWS_SECRET_KEY)

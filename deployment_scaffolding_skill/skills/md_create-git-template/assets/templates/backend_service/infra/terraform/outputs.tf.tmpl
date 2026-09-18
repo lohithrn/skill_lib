@@ -1,0 +1,14 @@
+# Service outputs, written to terraform_outputs_<env>.txt by the deploy script.
+# These reference the placeholder ./lambdas compute in main.tf — replace them
+# with outputs for whatever real compute you define (ECS service name, App Runner
+# service URL, API Gateway base URL, etc.).
+
+output "service_lambda_name" {
+  description = "Name of the deployed service Lambda (placeholder compute)."
+  value       = module.service_compute.lambda_name
+}
+
+output "service_lambda_arn" {
+  description = "ARN of the deployed service Lambda (placeholder compute)."
+  value       = module.service_compute.lambda_arn
+}

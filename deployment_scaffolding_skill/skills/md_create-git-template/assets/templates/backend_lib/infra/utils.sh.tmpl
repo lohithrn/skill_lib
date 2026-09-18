@@ -1,0 +1,410 @@
+#!/bin/bash
+# Utility functions for __PROJECT_NAME__ build and publish scripts.
+# Generic "build wheel -> version -> upload to S3 -> print pip install URL" infra.
+
+# Function to set up and activate virtual environment
+setup_venv() {
+    local venv_name="${VENV_NAME:-${TENANT_NAME}_venv}"
+    echo "Setting up virtual environment: $venv_name"
+
+    # Check if python3 is available
+    if ! command -v python3 &> /dev/null; then
+        echo "Error: Python 3 is not installed. Please install it first."
+        return 1
+    fi
+
+    # Save current aliases if they exist
+    local python_alias=""
+    if alias python 2>/dev/null; then
+        python_alias=$(alias python)
+        echo "Temporarily unaliasing python for venv setup..."
+        unalias python
+    fi
+
+    local python3_alias=""
+    if alias python3 2>/dev/null; then
+        python3_alias=$(alias python3)
+        echo "Temporarily unaliasing python3 for venv setup..."
+        unalias python3
+    fi
+
+    # Check if venv exists, create if it doesn't
+    if [ ! -d "$venv_name" ]; then
+        echo "Creating virtual environment: $venv_name"
+        command python3 -m venv "$venv_name"
+    else
+        echo "Using existing virtual environment: $venv_name"
+    fi
+
+    # Activate the virtual environment
+    echo "Activating virtual environment: $venv_name"
+    source "$venv_name/bin/activate"
+
+    # Verify correct Python is used
+    echo "Using Python: $(which python) ($(python --version 2>&1))"
+
+    # Upgrade pip
+    echo "Upgrading pip..."
+    pip install --upgrade pip
+
+    # Install the tooling needed to build and publish a wheel to S3
+    echo "Installing/upgrading build & publish tooling..."
+    pip install boto3
+    pip install docutils>=0.21.2
+    pip install readme-renderer
+    pip install twine
+    pip install awscliv2
+
+    # Restore aliases if they existed
+    if [ -n "$python_alias" ]; then
+        eval "$python_alias"
+    fi
+
+    if [ -n "$python3_alias" ]; then
+        eval "$python3_alias"
+    fi
+
+    return 0
+}
+
+# Function to check if AWS CLI is installed and AWS profile is configured
+check_aws_credentials() {
+    echo "Checking AWS setup..."
+
+    if ! command -v aws &> /dev/null; then
+        echo "Error: AWS CLI is not installed. Please install it first."
+        return 1
+    fi
+
+    if [ -z "$AWS_PROFILE" ]; then
+        echo "Warning: AWS_PROFILE environment variable is not set."
+        if ! aws configure list &> /dev/null; then
+            echo "Error: No AWS credentials found. Please run 'aws configure' first."
+            return 1
+        fi
+    else
+        echo "Using AWS profile: $AWS_PROFILE"
+    fi
+
+    return 0
+}
+
+# Function to create an S3 bucket with public read access if AWS profile is set
+create_s3_bucket_if_not_exists() {
+    local bucket_name=$1
+    local region=${2:-"__DEPLOY_REGION_BETA__"}
+
+    echo "Checking if bucket $bucket_name exists..."
+
+    if aws s3api head-bucket --bucket "$bucket_name" --profile "$AWS_PROFILE" 2>/dev/null; then
+        echo "Bucket $bucket_name already exists."
+
+        if [ -n "$AWS_PROFILE" ]; then
+            echo "Updating public access block settings for $bucket_name..."
+            aws s3api put-public-access-block \
+                --bucket "$bucket_name" \
+                --public-access-block-configuration \
+                "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+            echo "Re-applying public read access policy for $bucket_name..."
+            policy_file=$(mktemp)
+            cat > "$policy_file" << EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "PublicReadGetObject",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::$bucket_name/*"
+        }
+    ]
+}
+EOF
+            aws s3api put-bucket-policy --bucket "$bucket_name" --policy file://"$policy_file"
+            rm "$policy_file"
+            echo "Public read access policy set for $bucket_name."
+        fi
+    else
+        echo "Creating bucket $bucket_name in region $region..."
+        aws s3api create-bucket \
+            --bucket "$bucket_name" \
+            --region "$region" \
+            --create-bucket-configuration LocationConstraint="$region" \
+            --profile "$AWS_PROFILE"
+
+        if [ -n "$AWS_PROFILE" ]; then
+            echo "Setting public read access policy for $bucket_name..."
+            echo "Disabling public access block settings for $bucket_name..."
+            aws s3api put-public-access-block \
+                --bucket "$bucket_name" \
+                --public-access-block-configuration \
+                "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+            policy_file=$(mktemp)
+            cat > "$policy_file" << EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "PublicReadGetObject",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::$bucket_name/*"
+        }
+    ]
+}
+EOF
+            aws s3api put-bucket-policy --bucket "$bucket_name" --policy file://"$policy_file"
+            rm "$policy_file"
+            echo "Public read access policy set for $bucket_name."
+        else
+            echo "AWS_PROFILE not set. Bucket created without public read access."
+        fi
+    fi
+}
+
+# Function to build the package (wheel only)
+build_package() {
+    echo "Building package..."
+    # `python3 setup.py` needs setuptools+wheel, which newer Python venvs
+    # (3.12+) no longer bundle by default. Ensure they're present first.
+    python3 -m pip install --quiet --upgrade setuptools wheel
+    # Build the wheel ONLY (no sdist). The wheel is the documented install artifact.
+    python3 setup.py bdist_wheel
+    echo "Build completed successfully."
+}
+
+# Function to upload package to S3 using AWS CLI
+upload_to_s3() {
+    local bucket_name=$1
+    local version=$2
+    local package_name=${3:-"__PACKAGE_NAME__"}
+
+    echo "Uploading package to S3 bucket: $bucket_name using AWS CLI..."
+
+    if ! command -v aws &> /dev/null; then
+        echo "Error: AWS CLI is not installed. Please install it first."
+        return 1
+    fi
+
+    local aws_profile_arg=""
+    if [ -n "$AWS_PROFILE" ]; then
+        echo "Using AWS profile: $AWS_PROFILE"
+        aws_profile_arg="--profile $AWS_PROFILE"
+    else
+        echo "No AWS_PROFILE set, using default credentials"
+    fi
+
+    wheel_file=$(find dist -name "*.whl" | sort -V | tail -n 1)
+    tarball=$(find dist -name "*.tar.gz" | sort -V | tail -n 1)
+
+    if [ -z "$wheel_file" ] && [ -z "$tarball" ]; then
+        echo "Error: No distribution files found in dist/ directory."
+        return 1
+    fi
+
+    local temp_dir=$(mktemp -d)
+    trap 'rm -rf "$temp_dir"' EXIT
+
+    upload_distribution_files "$bucket_name" "$wheel_file" "$tarball" "$aws_profile_arg"
+    create_pypi_index_structure "$bucket_name" "$wheel_file" "$tarball" "$temp_dir" "$aws_profile_arg" "$package_name"
+
+    echo "Package upload complete."
+    echo "Package can be installed with:"
+    echo "  pip install --index-url https://$bucket_name.s3.amazonaws.com/simple $package_name"
+    echo "  or"
+    echo "  pip install https://$bucket_name.s3.amazonaws.com/$(basename "$wheel_file")"
+
+    return 0
+}
+
+# Function to upload distribution files to S3
+upload_distribution_files() {
+    local bucket_name=$1
+    local wheel_file=$2
+    local tarball=$3
+    local aws_profile_arg=$4
+
+    if [ -n "$wheel_file" ]; then
+        wheel_basename=$(basename "$wheel_file")
+        echo "Uploading wheel file: $wheel_basename"
+
+        if aws s3 cp "$wheel_file" "s3://$bucket_name/$wheel_basename" $aws_profile_arg; then
+            echo "Wheel URL: https://$bucket_name.s3.amazonaws.com/$wheel_basename"
+        else
+            echo "Failed to upload wheel file to S3."
+            return 1
+        fi
+    fi
+
+    if [ -n "$tarball" ]; then
+        tarball_basename=$(basename "$tarball")
+        echo "Uploading tarball: $tarball_basename"
+
+        if aws s3 cp "$tarball" "s3://$bucket_name/$tarball_basename" $aws_profile_arg; then
+            echo "Tarball URL: https://$bucket_name.s3.amazonaws.com/$tarball_basename"
+        else
+            echo "Failed to upload tarball to S3."
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# Function to create PyPI-compatible index structure in S3 (PEP 503)
+create_pypi_index_structure() {
+    local bucket_name=$1
+    local wheel_file=$2
+    local tarball=$3
+    local temp_dir=$4
+    local aws_profile_arg=$5
+    local package_name=${6:-"__PACKAGE_NAME__"}
+
+    echo "Creating PyPI-compatible index structure..."
+
+    echo "Creating 'simple' directory in S3 bucket..."
+    aws s3api put-object --bucket "$bucket_name" --key "simple/" $aws_profile_arg
+
+    echo "Creating package directory in simple/..."
+    aws s3api put-object --bucket "$bucket_name" --key "simple/$package_name/" $aws_profile_arg
+
+    local main_index_path="$temp_dir/main_index.html"
+    cat > "$main_index_path" << EOF
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Simple Index</title>
+  </head>
+  <body>
+    <h1>Simple Index</h1>
+    <a href="$package_name/">$package_name</a>
+  </body>
+</html>
+EOF
+
+    aws s3 cp "$main_index_path" "s3://$bucket_name/simple/index.html" $aws_profile_arg
+
+    local package_index_path="$temp_dir/package_index.html"
+    cat > "$package_index_path" << EOF
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Links for $package_name</title>
+  </head>
+  <body>
+    <h1>Links for $package_name</h1>
+EOF
+
+    if [ -n "$wheel_file" ]; then
+        wheel_basename=$(basename "$wheel_file")
+        echo "    <a href=\"../../$wheel_basename#sha256=placeholder\">$wheel_basename</a><br/>" >> "$package_index_path"
+    fi
+    if [ -n "$tarball" ]; then
+        tarball_basename=$(basename "$tarball")
+        echo "    <a href=\"../../$tarball_basename#sha256=placeholder\">$tarball_basename</a><br/>" >> "$package_index_path"
+    fi
+
+    cat >> "$package_index_path" << EOF
+  </body>
+</html>
+EOF
+
+    aws s3 cp "$package_index_path" "s3://$bucket_name/simple/$package_name/index.html" $aws_profile_arg
+    aws s3 cp "$main_index_path" "s3://$bucket_name/index.html" $aws_profile_arg
+
+    echo "PyPI-compatible index structure created at: https://$bucket_name.s3.amazonaws.com/simple/"
+}
+
+# Function to get the current version from setup.py
+get_version() {
+    version=$(grep -o "version=\"[^\"]*\"" setup.py | sed 's/version="\(.*\)"/\1/')
+    if [ -z "$version" ]; then
+        echo "Error: Could not determine version from setup.py"
+        exit 1
+    fi
+    echo "$version"
+}
+
+# Function to clean up the build environment
+clean_environment() {
+    echo "Cleaning up build environment..."
+    rm -rf build/
+    rm -rf dist/
+    rm -rf *.egg-info
+}
+
+# Function to install the package in development mode (with dev extras)
+install_dev() {
+    echo "Installing package in development mode..."
+    pip3 install -e ".[dev]"
+}
+
+# Display a message about S3 bucket access
+display_s3_access_message() {
+    local bucket_name=$1
+    local package_name=${2:-"__PACKAGE_NAME__"}
+
+    if [ -n "$AWS_PROFILE" ]; then
+        echo "S3 bucket $bucket_name is configured for public read access via bucket policy."
+        echo "Anyone can read artifacts using URLs like:"
+        echo "https://$bucket_name.s3.amazonaws.com/${package_name}-$(get_version)-py3-none-any.whl"
+    else
+        echo "S3 bucket $bucket_name is created without public read access."
+        echo "Set AWS_PROFILE environment variable to enable public read access."
+    fi
+}
+
+###########################################
+# Print Utilities
+###########################################
+# Color via tput when running on a real terminal; fall back to plain echo in CI
+# (no $TERM set), where tput would fail and abort the script under `set -e`.
+_supports_color() {
+    [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM}" != "dumb" ] && command -v tput >/dev/null 2>&1 && tput setaf 1 >/dev/null 2>&1
+}
+
+print_green() {
+    if _supports_color; then
+        tput setaf 2; echo "$1"; tput sgr0
+    else
+        echo "$1"
+    fi
+}
+
+print_red() {
+    if _supports_color; then
+        tput setaf 1; echo "$1"; tput sgr0
+    else
+        echo "$1"
+    fi
+}
+
+###########################################
+# AWS Utilities
+###########################################
+setup_aws() {
+    print_green "Initializing AWS CLI profile '${AWS_PROFILE}'..."
+
+    export AWS_PROFILE="${AWS_PROFILE}"
+
+    # Accept EITHER auth style:
+    #   - static access key (CI path: login_with_assume_role writes one), or
+    #   - SSO config (local path: z_deploy_*_from_local.sh configures sso_start_url).
+    if ! aws configure get aws_access_key_id --profile "${AWS_PROFILE}" &>/dev/null \
+       && ! aws configure get sso_start_url --profile "${AWS_PROFILE}" &>/dev/null; then
+        print_red "AWS profile '${AWS_PROFILE}' does not exist or is not properly configured! Please run: aws configure --profile ${AWS_PROFILE}"
+        exit 2
+    fi
+
+    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text 2>/dev/null)
+    if [[ -z "$AWS_ACCOUNT_ID" ]]; then
+        print_red "Failed to retrieve AWS account ID. Check your AWS credentials."
+        exit 1
+    fi
+
+    print_green "AWS profile '${AWS_PROFILE}' is valid and working correctly."
+}

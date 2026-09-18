@@ -1,0 +1,23 @@
+# Project-local AWS creds/config written by the deploy scripts (never commit).
+.aws/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfplan
+infra/terraform/terraform-debug.log
+infra/terraform_outputs_*.txt
+*.tfvars
+
+# Build artifacts
+lambda_package.zip
+dist/
+build/
+
+# Local-only deploy overrides (gitignored env files sourced by z_deploy_*_from_local.sh)
+z_local_env.*.sh

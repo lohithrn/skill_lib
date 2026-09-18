@@ -1,0 +1,131 @@
+#!/bin/bash
+set -e
+set -x
+# shellcheck disable=SC2120
+
+############################################
+# Environment setup
+############################################
+setup_environment_prod() {
+    export tenant_name="${TENANT_NAME:-__TENANT_NAME__}"
+    export VENV_NAME="${tenant_name}_venv"
+    export stage="PROD"
+    export SERVICE_NAME=$(basename "$PWD" | tr '[:upper:]' '[:lower:]')
+    export PROJECT_NAME="${SERVICE_NAME}"
+
+    # ─── Profile model (see z_setup_s3_create_deploy_beta.sh for details) ───
+    # credential_profile         : SOURCE creds profile used to assume the role.
+    # temporary_aws_profile_name : THROWAWAY CLI PROFILE (credentials pointer only,
+    #                              = PROJECT_NAME). NEVER names a persisted resource.
+    # deployment_tenant_profile  : PERSISTED-RESOURCE IDENTITY (terraform STATE
+    #                              bucket + resource suffixes). Stable; NO default —
+    #                              fails loudly if empty.
+    # tenant_name                : branding/display only (VITE_TENANT).
+    export credential_profile="${PARAM_PROFILE_NAME:-__TENANT_NAME__}"
+    export temporary_aws_profile_name="${PROJECT_NAME}"
+    export deployment_tenant_profile="${DEPLOYMENT_TENANT_PROFILE:-__DEPLOYMENT_TENANT_PROFILE__}"
+
+    export ENVIRONMENT="${stage}"
+    export REGION=${4:-"__DEPLOY_REGION_PROD__"}
+
+    export TENANT_UPPER=$(echo "${tenant_name}" | tr '[:lower:]' '[:upper:]')
+    export STAGE_UPPER=$(echo "${stage}" | tr '[:lower:]' '[:upper:]')
+    export ENVIRONMENT_LOWER=$(echo "${ENVIRONMENT}" | tr '[:upper:]' '[:lower:]')
+
+    export web_app_root_path=$(realpath ".")
+    export web_app_build_path=$(realpath "./dist")
+
+    # ─── Assume-role config ───
+    # Role name = <project/dir name>-<hardcoded suffix>. The account id is
+    # derived at assume time from the caller identity (see login_with_assume_role),
+    # so it does not need to be hardcoded here.
+    export DEPLOY_ROLE_SUFFIX="frontend-prod-deploy-role"
+    export DEPLOY_ROLE_NAME="${PROJECT_NAME}-${DEPLOY_ROLE_SUFFIX}"
+
+    # Clean stale env files
+    rm -f "${web_app_root_path}/.env"
+    rm -f "${web_app_build_path}/.env"
+
+    # ─── Frontend Environment Variables (Dotenv) ───
+    export VITE_STAGE="prod"
+    export VITE_TENANT="${tenant_name}"
+    export VITE_PRODUCTION="true"
+    export VITE_SITE_URL="https://__DOMAIN_NAME__"
+
+    # Domain / infra (apex __DOMAIN_NAME__ served at the root + www)
+    export certificate_domain_lookup="*.__DOMAIN_NAME__"
+    export domain_name="__DOMAIN_NAME__"
+    export subdomain_name="www.__DOMAIN_NAME__"
+    export apex_domain_name="__DOMAIN_NAME__"
+    export web_s3_bucket_name="${subdomain_name}"
+
+    export certificate_arn="__CERTIFICATE_ARN_PROD__"
+}
+
+############################################
+# AWS Configuration
+############################################
+AWS_REGION="__DEPLOY_REGION_PROD__"
+
+############################################
+# Utilities
+############################################
+source ./infra/utils.sh
+source ./infra/terraform_utils.sh
+source ./infra/provider_login.sh
+
+############################################
+# Main
+############################################
+main() {
+    command -v dos2unix >/dev/null 2>&1 && find . -type f -name "*.sh" -exec dos2unix {} \;
+
+    setup_environment_prod
+
+    # PERSISTED-RESOURCE IDENTITY guard — fail loud BEFORE any AWS action.
+    # deployment_tenant_profile names persisted resources (terraform state bucket,
+    # resource suffixes) and has NO default: it must never silently fall back to
+    # tenant_name, PROJECT_NAME, or anything else, or state/resources would drift.
+    if [ -z "${deployment_tenant_profile:-}" ]; then
+        echo "ERROR: deployment_tenant_profile is empty/unset. It is the PERSISTED-RESOURCE" >&2
+        echo "       identity (names the terraform state bucket + resource suffixes) and has" >&2
+        echo "       NO default. Set DEPLOYMENT_TENANT_PROFILE or substitute the" >&2
+        echo "       __DEPLOYMENT_TENANT_PROFILE__ token before deploying." >&2
+        exit 1
+    fi
+
+    # Isolate AWS creds/config to project-local files (before any auth) so local
+    # SSO and CI assume-role both read/write the same profile location.
+    use_project_local_aws_files
+
+    # The AWS CLI profile terraform + the aws CLI use is the assumed-role profile.
+    export AWS_PROFILE="${temporary_aws_profile_name}"
+
+    login_with_assume_role "$__TENANT_NAME_UPPER___PROD_FRONTEND_AWS_ACCESS_KEY" "$__TENANT_NAME_UPPER___PROD_FRONTEND_AWS_SECRET_KEY"
+    setup_aws
+
+    # Clean old build
+    rm -rf "${web_app_build_path}"
+
+    # Generate env file for the build (root)
+    generate_dotenv "."
+    build_web_app
+
+    # Inject env into dist (for safety / debugging)
+    generate_dotenv "./dist"
+
+    deploy_terraform \
+        "${temporary_aws_profile_name}" \
+        "${ENVIRONMENT}" \
+        "${REGION}" \
+        "${PROJECT_NAME}" \
+        "${domain_name}" \
+        "${web_app_build_path}" \
+        "${web_s3_bucket_name}" \
+        "${certificate_arn}" \
+        "${apex_domain_name}" \
+        "${tenant_name}" \
+        "${deployment_tenant_profile}"
+}
+
+main "$@"

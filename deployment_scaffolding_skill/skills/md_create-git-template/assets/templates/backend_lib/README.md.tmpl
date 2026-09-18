@@ -1,0 +1,46 @@
+# __PROJECT_NAME__
+
+A Python library (`__PACKAGE_NAME__`) that is built into a wheel and **published to an S3 bucket** — not a running service. Consumers install it with `pip` from the bucket's public-read PEP 503 index.
+
+## What it publishes
+
+`python setup.py bdist_wheel` produces a wheel, which is uploaded to the stage's S3 bucket along with a PyPI-compatible `simple/` index. Install with:
+
+```
+pip install --index-url https://<bucket>.s3.amazonaws.com/simple __PACKAGE_NAME__
+# or the direct wheel URL:
+pip install https://<bucket>.s3.amazonaws.com/__PACKAGE_NAME__-<version>-py3-none-any.whl
+```
+
+Buckets: beta → `__PACKAGE_S3_BUCKET_BETA__`, prod → `__PACKAGE_S3_BUCKET_PROD__`.
+
+## Config
+
+All per-repo values are centralized in `project_constants.sh` (sourced by every script). Version lives in `setup.py`.
+
+### Identities (do not conflate)
+
+- **`temporary_aws_profile_name`** = `${PROJECT_NAME}` — the THROWAWAY AWS CLI credentials pointer (`AWS_PROFILE`). The CLI forces `--profile`; this profile is created/deleted per run and its value may change run-to-run. CI assumes the deployment role into it; local `z_deploy_beta_from_local.sh` uses SSO into it. **Never names any persisted resource.**
+- **`deployment_tenant_profile`** (`__DEPLOYMENT_TENANT_PROFILE__`) — the PERSISTED-resource identity that owns the published S3 buckets. It has **no default**: `require_deployment_tenant_profile` fails loudly (stderr + `exit 1`) if it's unset, so nothing persisted can ever be named from the throwaway profile.
+- **`TENANT_NAME`** — branding only (venv name, labels). Not used to name persisted resources. The bucket names are the explicit `__PACKAGE_S3_BUCKET_BETA__/__PROD__` tokens.
+
+## The `z_` scripts and their order
+
+**Beta (local):**
+1. `./z_deploy_beta_from_local.sh` — self-configures a folder-named AWS SSO profile, logs in, verifies the account, then calls:
+2. `./z_build_and_publish_beta.sh` — assume-role (CI) or verify SSO (local) → clean → install dev deps → run tests → build wheel → ensure bucket → upload → print install URL.
+
+**Beta (CI):** the pipeline runs `z_build_and_publish_beta.sh` directly (static keys → assume-role).
+
+**Prod (CI only):**
+3. `./z_build_and_publish_prod.sh` — guarded CI-only (`TF_BUILD=True`); clean → build wheel → ensure bucket → upload → print install URL. Runs from the pipeline's `DeployToProd` stage after beta succeeds.
+
+### infra/ helpers (sourced, not run standalone)
+- `infra/utils.sh` — venv setup, build, S3 bucket create/policy, upload + PEP 503 index, version, AWS checks.
+- `infra/provider_login.sh` — `login_with_assume_role`: static-key assume-role (CI) or SSO-session verify (local).
+- `infra/z_clean.sh` — remove `build/`, `dist/`, `*.egg-info`, caches.
+- `infra/z_run_local_tests.sh` — run the test suite before publishing.
+
+## Pipeline
+
+`pipelines/azure-pipelines.yml` — two stages: `DeployAndTestBeta` then `DeployToProd`. Deploy keys come from the ADO variable group named after `__TENANT_NAME__` (`{BETA,PROD}_BACKEND_AWS_{ACCESS,SECRET}_KEY`).

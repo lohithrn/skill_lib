@@ -1,0 +1,19 @@
+{
+  "name": "global-doctrine",
+  "displayName": "Global Doctrine",
+  "description": "The two always-on preferences that sit above every project: judge code against the system being built rather than the current snapshot, never use machine-generated certificates or keypairs as an authorization mechanism, and shape output so it can be acted on. Meant to be pasted into a global instruction file as well as installed.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lohith"
+  },
+  "license": "MIT",
+  "keywords": [
+    "doctrine",
+    "preferences",
+    "headroom",
+    "auth",
+    "sigv4",
+    "output-style",
+    "accessibility"
+  ]
+}
