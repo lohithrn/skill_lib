@@ -1,0 +1,26 @@
+{
+  "name": "codegraph",
+  "displayName": "CodeGraph",
+  "description": "Reads a codebase as a dependency graph, then restructures it so every conflict becomes an interface, every interface has replaceable implementations wired at a single composition root, and the folder tree is the graph. Explicit invocation only.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Lohith"
+  },
+  "license": "MIT",
+  "keywords": [
+    "architecture",
+    "refactoring",
+    "solid",
+    "dependency-injection",
+    "code-graph",
+    "polymorphism",
+    "contract-tests"
+  ],
+  "agents": [
+    "./agents/codegraph-cartographer.md",
+    "./agents/codegraph-inspector.md",
+    "./agents/codegraph-architect.md",
+    "./agents/codegraph-adversary.md",
+    "./agents/codegraph-surgeon.md"
+  ]
+}

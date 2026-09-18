@@ -1,0 +1,11 @@
+# Local Claude Code settings (machine-specific: base URLs, hook paths)
+.claude/settings.local.json
+.claude/.headroom_wrap_marker.json
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
